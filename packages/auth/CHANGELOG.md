@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 — 2026-10-12
+
+### Fixed
+
+- **The expiry sweep no longer causes unhandled promise rejections.** Every minute the runtime deletes expired sessions and login transactions with `void store.deleteExpired(now)`. While the database was unreachable, each failed delete became an unhandled rejection. A failed sweep now logs one warning (`[@plumbus/auth] expired sessions sweep failed; retrying next sweep`, with the error message) and runs again on the next sweep.
+
 ## 0.2.1 — 2026-09-10
 
 ### Fixed

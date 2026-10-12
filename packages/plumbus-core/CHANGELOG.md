@@ -1,5 +1,9 @@
 # @plumbus/core changelog
 
+## 0.7.10 — 2026-10-12
+
+- Background loops no longer crash with unhandled promise rejections while the database or Redis is unreachable. The flow scheduler's poll and the Redis delayed-wake promoter started each tick with `void poll()` / `void promoteOnce()`, so a failed query (`CONNECT_TIMEOUT`, `ECONNREFUSED`) became an unhandled rejection on every tick until the store came back. Each tick now catches the error, logs one warning (`Flow scheduler poll failed; retrying next tick` / `Delayed flow wake promotion failed; retrying next tick`, with the error message), and the loop tries again on the next tick. `scheduler.poll()` and `promoteOnce()` still reject when called directly. `FlowDelayedPromoterConfig.logger` accepts an optional `warn`; without it the warning goes to `console.warn`.
+
 ## 0.7.9 — 2026-10-08
 
 - Fix `plumbus e2e` freezing the frontend dev server partway through a long run. The server's stdout was piped but never read, and `next dev` writes a line there for every request with stdout in blocking mode, so after about 80 KB (roughly 1,000 page loads) the server blocked in that write for good. The test in flight timed out at its 30 s limit and every later test would too, which looked like one random late test failing. The runner now reads and discards that stream; stderr is still relayed as `[frontend]` lines.

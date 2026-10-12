@@ -104,6 +104,16 @@ export function createFlowScheduler(config: SchedulerConfig) {
     return triggered;
   }
 
+  async function tick(): Promise<void> {
+    try {
+      await poll();
+    } catch (err: unknown) {
+      const details = { error: err instanceof Error ? err.message : String(err) };
+      if (logger) logger.warn('Flow scheduler poll failed; retrying next tick', details);
+      else console.warn('[plumbus] flow scheduler poll failed; retrying next tick', details);
+    }
+  }
+
   return {
     syncSchedules,
     poll,
@@ -112,7 +122,7 @@ export function createFlowScheduler(config: SchedulerConfig) {
       if (running) return;
       running = true;
       timer = setInterval(() => {
-        void poll();
+        void tick();
       }, pollIntervalMs);
     },
 

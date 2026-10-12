@@ -115,6 +115,43 @@ describe('FlowScheduler', () => {
     expect(scheduler.isRunning).toBe(true);
     scheduler.stop();
   });
+
+  it('logs a failed poll and keeps polling instead of rejecting', async () => {
+    vi.useFakeTimers();
+    try {
+      const db = mockDb();
+      db.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockRejectedValue(new Error('CONNECT_TIMEOUT')),
+        }),
+      });
+      const logger: LoggerService = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+      const scheduler = createFlowScheduler({
+        db,
+        registry: new FlowRegistry(),
+        engine: mockEngine() as any,
+        logger,
+        pollIntervalMs: 1_000,
+      });
+
+      scheduler.start();
+      await vi.advanceTimersByTimeAsync(2_000);
+      scheduler.stop();
+
+      expect(db.select).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith('Flow scheduler poll failed; retrying next tick', {
+        error: 'CONNECT_TIMEOUT',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('computeNextRun', () => {
