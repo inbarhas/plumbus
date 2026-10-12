@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 — 2026-10-12
+
+### Fixed
+
+- **Auth audit events are saved again.** The runtime wrote events with only `action` and `metadata`, so `createDatabaseAuditWriter` (the documented wiring) failed on every login, logout, and session replacement: `audit_records.component` and `audit_records.outcome` are `NOT NULL`. Events now carry `component: 'plumbus.auth'` (exported as `AUTH_AUDIT_COMPONENT`) and an `outcome`: `denied` for `auth.login.denied`, `failure` for `auth.login.failed` and `auth.login.cancelled`, `success` for the rest. The emitter's writer is now typed as `AuditWriter` from `@plumbus/core`, so a missing field is a type error.
+- **Failed audit writes say why.** `[@plumbus/auth] audit write failed for <event>` now includes the error message and code (from the driver error when Drizzle wraps it). Requests still never fail because of the audit write.
+
 ## 0.2.1 — 2026-09-10
 
 ### Fixed
