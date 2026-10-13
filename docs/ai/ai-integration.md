@@ -496,7 +496,7 @@ Optional ProviderResponse.cost ◄────── sets cost from usage × rat
 MODEL_PRICING (OpenAI/Anthropic only)
 ```
 
-Core’s optional peer: `"@plumbus/ai-bedrock": "0.2.x"`. The add-on’s required peer: `"@plumbus/core": "0.7.x"` (copy literals — see `packages/plumbus-core/instructions/peer-dependencies.md`). **Runtime floor:** `@plumbus/core` **≥ 0.7.0**; prompt caching through `ctx.ai` needs core **≥ 0.7.9** (earlier cores never pass `cache` to the adapter) and `@plumbus/ai-bedrock` **≥ 0.2.2**.
+Core’s optional peer: `"@plumbus/ai-bedrock": "0.3.x"`. The add-on’s required peer: `"@plumbus/core": "0.8.x"` (copy literals — see `packages/plumbus-core/instructions/peer-dependencies.md`). **Runtime floor:** `@plumbus/core` **≥ 0.7.0**; prompt caching through `ctx.ai` needs core **≥ 0.7.9** (earlier cores never pass `cache` to the adapter) and `@plumbus/ai-bedrock` **≥ 0.2.2**.
 
 #### Install and wire
 
@@ -1014,7 +1014,7 @@ For the voice-specific runtime, provider, and security guidance, see:
 3. Route voice/media spend through `ctx.ai.recordProviderCost(...)` so `onAICostRecorded` stays the single hook.
 4. Pre-check shared USD caps with `ctx.ai.checkProviderCostBudget({ estimatedCostUsd })` before opening realtime sessions or calling STT/TTS.
 
-`@plumbus/voice` `0.3.x` peers on `@plumbus/core` `0.6.x`. `@plumbus/chat`, `@plumbus/knowledge-base`, `@plumbus/browser-extension`, `@plumbus/mcp`, and `@plumbus/api` declare `0.5.x || 0.6.x` and install alongside core **0.6.x**. `@plumbus/chat` **0.1.11+** needs core **≥ 0.6.11** at runtime (tool protocol / `updateWhere`) even though its declared peer is wider.
+For that historical 0.6.0 release, `@plumbus/voice` `0.3.x` peered on `@plumbus/core` `0.6.x`. `@plumbus/chat`, `@plumbus/knowledge-base`, `@plumbus/browser-extension`, `@plumbus/mcp`, and `@plumbus/api` declare `0.5.x || 0.6.x` and install alongside core **0.6.x**. `@plumbus/chat` **0.1.11+** needs core **≥ 0.6.11** at runtime (tool protocol / `updateWhere`) even though its declared peer was wider. These are historical ranges; current installations use the [stabilization family](../upgrading-stabilization.md).
 
 ### Deterministic sampling with `seed`
 

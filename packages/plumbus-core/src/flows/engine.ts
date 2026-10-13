@@ -1,9 +1,16 @@
-import { z } from 'zod';
+import { databaseTime } from './database-clock.js';
+import {
+  createFlowExecutionRecord,
+  flowAuthSchema,
+  type FlowStartOptions,
+} from './execution-record.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { deadLetterFlow } from './dead-letter.js';
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { parseDurationToMs } from '../config/duration.js';
+import { parseDurationToMs, resolveRetryPolicy, retryDelay } from '../config/index.js';
 import { FlowCancelledError, LeaseLostError } from '../errors/index.js';
 import type { EventQueue } from '../events/queue.js';
 import type { AuditService } from '../types/audit.js';
@@ -27,12 +34,7 @@ import {
   type StepHistoryEntry,
   StepStatus,
 } from './state-machine.js';
-import {
-  buildHistoryEntry,
-  executeStep,
-  type StepExecutorDeps,
-  type StepResult,
-} from './step-executor.js';
+import { buildHistoryEntry, executeStep, type StepExecutorDeps } from './step-executor.js';
 
 /** Default lease duration: 5 minutes */
 const DEFAULT_LEASE_DURATION_MS = 300_000;
@@ -65,6 +67,10 @@ export interface FlowEngineConfig {
   audit?: AuditService;
   queue?: EventQueue;
   /** Create a data service scoped to a specific auth context (for tenant isolation in flows). */
+  createContext?: (
+    auth: AuthContext,
+    metadata: { correlationId: string; flowId: string },
+  ) => ExecutionContext;
   createDataService?: (auth: AuthContext) => DataService;
   /** Create an event service scoped to a specific auth context. */
   createEventService?: (auth: AuthContext) => EventService;
@@ -125,20 +131,12 @@ interface FlowExecutionRow {
   updatedAt: Date;
   completedAt: Date | null;
   leaseOwner: string | null;
+  leaseToken: string | null;
+  waitKind: string | null;
   leaseExpiresAt: Date | null;
 }
 
 /** Type-safe partial update payload for flow executions. */
-const flowAuthSchema = z.object({
-  userId: z.string().min(1).optional(),
-  tenantId: z.string().min(1).optional(),
-  roles: z.array(z.string()),
-  scopes: z.array(z.string()),
-  provider: z.string().min(1),
-  providerId: z.string().optional(),
-  internal: z.boolean().optional(),
-});
-
 /** Legacy/corrupt snapshots never inherit the worker's privileges. */
 function resolveFlowStepAuth(row: FlowExecutionRow): AuthContext | null {
   const result = flowAuthSchema.safeParse(row.authSnapshotJson);
@@ -160,6 +158,8 @@ interface FlowExecutionUpdate {
   wakeAt?: Date | null;
   completedAt?: Date | null;
   leaseOwner?: string | null;
+  leaseToken?: string | null;
+  waitKind?: string | null;
   leaseExpiresAt?: Date | null;
 }
 
@@ -192,7 +192,13 @@ export function createFlowEngine(config: FlowEngineConfig) {
     correlationId?: string | null,
   ): Promise<void> {
     if (onFlowStepEnqueue) {
-      await onFlowStepEnqueue(executionId, correlationId ?? executionId);
+      try {
+        await onFlowStepEnqueue(executionId, correlationId ?? executionId);
+      } catch {
+        logger?.error('Flow wake publication failed; database reconciliation will recover', {
+          executionId,
+        });
+      }
     }
   }
 
@@ -204,6 +210,8 @@ export function createFlowEngine(config: FlowEngineConfig) {
    * (which now also fails when status != 'running').
    */
   const activeStepAborts = new Map<string, AbortController>();
+  const claims = new Map<string, string>();
+  const claimScope = new AsyncLocalStorage<{ id: string; token: string }>();
 
   /**
    * Start a new flow execution.
@@ -212,42 +220,15 @@ export function createFlowEngine(config: FlowEngineConfig) {
     flowName: string,
     input: unknown,
     auth: AuthContext,
-    opts?: { correlationId?: string; triggerEventId?: string; executionId?: string },
+    opts?: FlowStartOptions,
   ): Promise<FlowExecution> {
     const flow = registry.get(flowName);
     if (!flow) {
       throw new Error(`Flow "${flowName}" is not registered`);
     }
 
-    // Validate input
-    const parseResult = flow.input.safeParse(input);
-    if (!parseResult.success) {
-      throw new Error(`Flow "${flowName}": invalid input — ${parseResult.error.message}`);
-    }
-
-    const executionId = opts?.executionId ?? randomUUID();
-    const initialState = flow.state
-      ? (() => {
-          const parsed = flow.state.safeParse({});
-          return parsed.success ? parsed.data : {};
-        })()
-      : null;
-
-    await db.insert(flowExecutionsTable).values({
-      id: executionId,
-      flowName,
-      domain: flow.domain,
-      status: FlowStatus.Created,
-      input: parseResult.data as Record<string, unknown>,
-      state: initialState as Record<string, unknown> | null,
-      currentStep: flow.steps[0]?.name ?? null,
-      stepHistory: [],
-      actor: auth.userId ?? 'system',
-      tenantId: auth.tenantId ?? null,
-      authSnapshotJson: flowAuthSchema.parse(auth),
-      correlationId: opts?.correlationId ?? null,
-      triggerEventId: opts?.triggerEventId ?? null,
-    } satisfies typeof flowExecutionsTable.$inferInsert);
+    const execution = await createFlowExecutionRecord(db, flow, input, auth, opts);
+    const executionId = execution.id;
 
     if (audit) {
       await audit.record(`flow.started.${flowName}`, {
@@ -281,6 +262,7 @@ export function createFlowEngine(config: FlowEngineConfig) {
       UPDATE flow_executions
       SET status = ${FlowStatus.Running},
           lease_owner = ${workerId},
+          lease_token = gen_random_uuid(),
           lease_expires_at = now() + ${leaseDurationInterval}::interval,
           updated_at = now()
       WHERE id IN (
@@ -294,11 +276,12 @@ export function createFlowEngine(config: FlowEngineConfig) {
         FOR UPDATE SKIP LOCKED
         LIMIT ${limit}
       )
-      RETURNING *
+      RETURNING *, lease_token AS "leaseToken", flow_name AS "flowName", current_step AS "currentStep", lease_owner AS "leaseOwner"
     `);
 
     const rows = result as unknown as FlowExecutionRow[];
     for (const row of rows) {
+      if (row.leaseToken) claims.set(row.id, row.leaseToken);
       if (audit) {
         const wasExpired = row.status === FlowStatus.Running;
         if (wasExpired) {
@@ -333,6 +316,7 @@ export function createFlowEngine(config: FlowEngineConfig) {
       UPDATE flow_executions
       SET status = ${FlowStatus.Running},
           lease_owner = ${workerId},
+          lease_token = gen_random_uuid(),
           lease_expires_at = now() + ${leaseDurationInterval}::interval,
           updated_at = now()
       WHERE id = ${executionId}
@@ -341,11 +325,12 @@ export function createFlowEngine(config: FlowEngineConfig) {
           OR (status = ${FlowStatus.Running} AND lease_expires_at < now())
           OR (status = ${FlowStatus.Waiting} AND waiting_for_event IS NULL AND wake_at <= now())
         )
-      RETURNING *
+      RETURNING *, lease_token AS "leaseToken", flow_name AS "flowName", current_step AS "currentStep", lease_owner AS "leaseOwner"
     `);
 
     const rows = result as unknown as FlowExecutionRow[];
     const row = rows[0];
+    if (row?.leaseToken) claims.set(row.id, row.leaseToken);
     if (row && audit) {
       await audit.record('flow.lease.claimed', {
         executionId: row.id,
@@ -380,6 +365,11 @@ export function createFlowEngine(config: FlowEngineConfig) {
         and(
           eq(flowExecutionsTable.id, executionId),
           eq(flowExecutionsTable.leaseOwner, workerId),
+          eq(
+            flowExecutionsTable.leaseToken,
+            claimScope.getStore()?.token ?? '00000000-0000-0000-0000-000000000000',
+          ),
+          sql`${flowExecutionsTable.leaseExpiresAt} > now()`,
           eq(flowExecutionsTable.status, FlowStatus.Running),
         ),
       );
@@ -434,7 +424,28 @@ export function createFlowEngine(config: FlowEngineConfig) {
    * This is designed to be called by a worker process.
    * The execution must have been claimed by this worker (via claimNext) first.
    */
-  async function runNext(executionId: string, ctx: ExecutionContext): Promise<FlowExecution> {
+  async function runNext(
+    executionId: string,
+    ctx: ExecutionContext,
+    leaseToken?: string,
+  ): Promise<FlowExecution> {
+    let token = leaseToken ?? claims.get(executionId);
+    if (!token) {
+      const claimed = await claimExecution(executionId);
+      token = claimed?.leaseToken ?? undefined;
+      if (!token) {
+        const current = await status(executionId);
+        if (isTerminal(current.status as FlowStatus)) return current;
+        throw new LeaseLostError('Flow must be claimed before execution', { executionId });
+      }
+    }
+    return claimScope.run({ id: executionId, token }, () => runClaimedStep(executionId, ctx));
+  }
+
+  async function runClaimedStep(
+    executionId: string,
+    ctx: ExecutionContext,
+  ): Promise<FlowExecution> {
     const rows = await db
       .select()
       .from(flowExecutionsTable)
@@ -449,6 +460,8 @@ export function createFlowEngine(config: FlowEngineConfig) {
     if (isTerminal(row.status as FlowStatus)) {
       return { id: row.id, flowName: row.flowName, status: row.status };
     }
+
+    await guardedUpdate(executionId, {});
 
     const flow = registry.get(row.flowName);
     if (!flow) {
@@ -505,6 +518,11 @@ export function createFlowEngine(config: FlowEngineConfig) {
       );
       return { id: executionId, flowName: row.flowName, status: FlowStatus.Failed };
     }
+    ctx =
+      config.createContext?.(flowAuth, {
+        correlationId: row.correlationId ?? executionId,
+        flowId: executionId,
+      }) ?? ctx;
     const flowData = config.createDataService ? config.createDataService(flowAuth) : ctx.data;
     const flowEvents = createEventService ? createEventService(flowAuth) : ctx.events;
 
@@ -662,196 +680,209 @@ export function createFlowEngine(config: FlowEngineConfig) {
       }
     }, heartbeatIntervalMs);
 
-    // Execute the step
-    let result: StepResult;
-    const startedAt = new Date();
     try {
-      result = await executeStep(step, flowCtx, row.input, row.state, stepDeps);
-    } finally {
-      clearInterval(heartbeatTimer);
-      // Abort any stray detached tasks once the step settles so they observe
-      // the abort promptly. If already aborted (lease loss), this is a no-op.
-      if (!stepAc.signal.aborted) {
-        stepAc.abort();
+      // Heartbeat remains active through parallel branches and commits.
+      const startedAt = new Date();
+      const result = await executeStep(step, flowCtx, row.input, row.state, stepDeps);
+      const completedAt = new Date();
+
+      // Check if lease was lost during step execution
+      if (leaseLost) {
+        throw new LeaseLostError(
+          `Lease lost during step "${currentStepName}" of flow execution "${executionId}"`,
+          { executionId, workerId, step: currentStepName },
+        );
       }
-      if (activeStepAborts.get(executionId) === stepAc) {
-        activeStepAborts.delete(executionId);
-      }
-    }
-    const completedAt = new Date();
 
-    // Check if lease was lost during step execution
-    if (leaseLost) {
-      throw new LeaseLostError(
-        `Lease lost during step "${currentStepName}" of flow execution "${executionId}"`,
-        { executionId, workerId, step: currentStepName },
-      );
-    }
+      const historyEntry = buildHistoryEntry(currentStepName, result, startedAt, completedAt);
+      const history = Array.isArray(row.stepHistory) ? (row.stepHistory as StepHistoryEntry[]) : [];
+      history.push(historyEntry);
+      const nextState = mergeExecutionState(row.state, result.data);
 
-    const historyEntry = buildHistoryEntry(currentStepName, result, startedAt, completedAt);
-    const history = Array.isArray(row.stepHistory) ? (row.stepHistory as StepHistoryEntry[]) : [];
-    history.push(historyEntry);
-    const nextState = mergeExecutionState(row.state, result.data);
-
-    if (audit) {
-      await audit.record(`flow.step.${result.status}.${currentStepName}`, {
-        executionId,
-        flowName: row.flowName,
-        step: currentStepName,
-        status: result.status,
-        error: result.error,
-      });
-    }
-
-    // Handle result
-    if (result.status === StepStatus.Failed) {
-      return handleStepFailure(executionId, row, flow, history, result.error);
-    }
-
-    // Wait step — pause the flow
-    if (result.waitEvent) {
-      const ok = await guardedUpdate(executionId, {
-        status: FlowStatus.Waiting,
-        state: nextState,
-        stepHistory: history,
-        currentStep: currentStepName, // stay on current step until resumed
-        waitingForEvent: result.waitEvent,
-        wakeAt: null,
-        leaseOwner: null,
-        leaseExpiresAt: null,
-      });
-      if (!ok) {
-        throw new LeaseLostError(`Lease lost committing wait for flow execution "${executionId}"`, {
+      if (audit) {
+        await audit.record(`flow.step.${result.status}.${currentStepName}`, {
           executionId,
-          workerId,
+          flowName: row.flowName,
           step: currentStepName,
+          status: result.status,
+          error: result.error,
         });
       }
-      return { id: executionId, flowName: row.flowName, status: FlowStatus.Waiting };
-    }
 
-    // Delay step — schedule next step after duration
-    if (result.delayDuration) {
-      const nextStep = getNextStepName(flow.steps, currentStepName);
-      let delayMs: number;
-      try {
-        delayMs = parseDurationToMs(result.delayDuration, { label: 'delay' });
-      } catch (err) {
-        return handleStepFailure(
-          executionId,
-          row,
-          flow,
-          history,
-          err instanceof Error ? err.message : String(err),
-        );
+      // Handle result
+      if (result.status === StepStatus.Failed) {
+        return handleStepFailure(executionId, row, flow, history, result.error, result.permanent);
       }
-      const wakeAt = new Date(Date.now() + delayMs);
-      await guardedUpdate(executionId, {
-        status: FlowStatus.Waiting,
-        state: nextState,
-        stepHistory: history,
-        currentStep: nextStep,
-        waitingForEvent: null,
-        wakeAt,
-        leaseOwner: null,
-        leaseExpiresAt: null,
-      });
-      if (onFlowDelayedSchedule) {
-        await onFlowDelayedSchedule(executionId, wakeAt, row.correlationId ?? executionId);
-      }
-      return { id: executionId, flowName: row.flowName, status: FlowStatus.Waiting };
-    }
 
-    // Parallel step — execute all branches concurrently, then advance
-    if (result.parallelBranches) {
-      let parallelState = nextState;
-      const branchSteps = result.parallelBranches
-        .map((branchName) => flow.steps.find((s) => s.name === branchName))
-        .filter((s): s is FlowStep => s != null);
-
-      const branchResults = await Promise.allSettled(
-        branchSteps.map(async (branchStep) => {
-          const branchStart = new Date();
-          const branchResult = await executeStep(
-            branchStep,
-            flowCtx,
-            row.input,
-            row.state,
-            stepDeps,
+      // Wait step — pause the flow
+      if (result.waitEvent) {
+        const ok = await guardedUpdate(executionId, {
+          status: FlowStatus.Waiting,
+          state: nextState,
+          stepHistory: history,
+          currentStep: currentStepName, // stay on current step until resumed
+          waitingForEvent: result.waitEvent,
+          waitKind: 'event',
+          retryCount: 0,
+          wakeAt: null,
+          leaseOwner: null,
+          leaseToken: null,
+          leaseExpiresAt: null,
+        });
+        if (!ok) {
+          throw new LeaseLostError(
+            `Lease lost committing wait for flow execution "${executionId}"`,
+            {
+              executionId,
+              workerId,
+              step: currentStepName,
+            },
           );
-          const branchEnd = new Date();
-          return { branchStep, branchResult, branchStart, branchEnd };
-        }),
-      );
-
-      // Merge branch history entries after all branches complete (avoids concurrent mutation)
-      for (const settled of branchResults) {
-        if (settled.status === 'fulfilled') {
-          const { branchStep, branchResult, branchStart, branchEnd } = settled.value;
-          history.push(buildHistoryEntry(branchStep.name, branchResult, branchStart, branchEnd));
-          parallelState = mergeExecutionState(parallelState, branchResult.data);
         }
+        return { id: executionId, flowName: row.flowName, status: FlowStatus.Waiting };
       }
 
-      const anyFailed = branchResults.some(
-        (r) =>
-          r.status === 'rejected' ||
-          (r.status === 'fulfilled' && r.value.branchResult.status === StepStatus.Failed),
-      );
+      // Delay step — schedule next step after duration
+      if (result.delayDuration) {
+        const nextStep = getNextStepName(flow.steps, currentStepName);
+        let delayMs: number;
+        try {
+          delayMs = parseDurationToMs(result.delayDuration, { label: 'delay' });
+        } catch (err) {
+          return handleStepFailure(
+            executionId,
+            row,
+            flow,
+            history,
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+        const wakeAt = new Date((await databaseTime(db)).getTime() + delayMs);
+        await guardedUpdate(executionId, {
+          status: FlowStatus.Waiting,
+          state: nextState,
+          stepHistory: history,
+          currentStep: nextStep,
+          retryCount: 0,
+          waitingForEvent: null,
+          waitKind: 'delay',
+          wakeAt,
+          leaseOwner: null,
+          leaseToken: null,
+          leaseExpiresAt: null,
+        });
+        try {
+          await onFlowDelayedSchedule?.(executionId, wakeAt, row.correlationId ?? executionId);
+        } catch {
+          logger?.error('Delay wake publication failed; database reconciliation will recover', {
+            executionId,
+          });
+        }
+        return { id: executionId, flowName: row.flowName, status: FlowStatus.Waiting };
+      }
 
-      if (anyFailed) {
-        return handleStepFailure(
-          executionId,
-          row,
-          flow,
-          history,
-          'One or more parallel branches failed',
+      // Parallel step — execute all branches concurrently, then advance
+      if (result.parallelBranches) {
+        let parallelState = nextState;
+        const branchSteps = result.parallelBranches
+          .map((branchName) => flow.steps.find((s) => s.name === branchName))
+          .filter((s): s is FlowStep => s != null);
+
+        const branchResults = await Promise.allSettled(
+          branchSteps.map(async (branchStep) => {
+            const branchStart = new Date();
+            const branchResult = await executeStep(
+              branchStep,
+              flowCtx,
+              row.input,
+              row.state,
+              stepDeps,
+            );
+            const branchEnd = new Date();
+            return { branchStep, branchResult, branchStart, branchEnd };
+          }),
         );
+
+        // Merge branch history entries after all branches complete (avoids concurrent mutation)
+        for (const settled of branchResults) {
+          if (settled.status === 'fulfilled') {
+            const { branchStep, branchResult, branchStart, branchEnd } = settled.value;
+            history.push(buildHistoryEntry(branchStep.name, branchResult, branchStart, branchEnd));
+            parallelState = mergeExecutionState(parallelState, branchResult.data);
+          }
+        }
+
+        const anyFailed = branchResults.some(
+          (r) =>
+            r.status === 'rejected' ||
+            (r.status === 'fulfilled' && r.value.branchResult.status === StepStatus.Failed),
+        );
+
+        if (anyFailed) {
+          return handleStepFailure(
+            executionId,
+            row,
+            flow,
+            history,
+            'One or more parallel branches failed',
+          );
+        }
+
+        const nextStep = getNextStepName(flow.steps, currentStepName);
+        await guardedUpdate(executionId, {
+          state: parallelState,
+          stepHistory: history,
+          currentStep: nextStep,
+          retryCount: 0,
+        });
+        if (!nextStep) {
+          await completeFlow(executionId, row.flowName);
+          return { id: executionId, flowName: row.flowName, status: FlowStatus.Completed };
+        }
+        return { id: executionId, flowName: row.flowName, status: FlowStatus.Running };
       }
 
+      // Conditional step — jump to the chosen branch
+      if (result.nextStep) {
+        await guardedUpdate(executionId, {
+          state: nextState,
+          stepHistory: history,
+          currentStep: result.nextStep,
+          retryCount: 0,
+        });
+        return { id: executionId, flowName: row.flowName, status: FlowStatus.Running };
+      }
+
+      // Normal completion — advance to next step
       const nextStep = getNextStepName(flow.steps, currentStepName);
-      await guardedUpdate(executionId, {
-        state: parallelState,
-        stepHistory: history,
-        currentStep: nextStep,
-      });
       if (!nextStep) {
+        await guardedUpdate(executionId, { state: nextState, stepHistory: history });
         await completeFlow(executionId, row.flowName);
         return { id: executionId, flowName: row.flowName, status: FlowStatus.Completed };
       }
-      return { id: executionId, flowName: row.flowName, status: FlowStatus.Running };
-    }
 
-    // Conditional step — jump to the chosen branch
-    if (result.nextStep) {
       await guardedUpdate(executionId, {
         state: nextState,
         stepHistory: history,
-        currentStep: result.nextStep,
+        currentStep: nextStep,
+        retryCount: 0,
       });
       return { id: executionId, flowName: row.flowName, status: FlowStatus.Running };
+    } finally {
+      clearInterval(heartbeatTimer);
+      if (!stepAc.signal.aborted) stepAc.abort();
+      if (activeStepAborts.get(executionId) === stepAc) activeStepAborts.delete(executionId);
     }
-
-    // Normal completion — advance to next step
-    const nextStep = getNextStepName(flow.steps, currentStepName);
-    if (!nextStep) {
-      await guardedUpdate(executionId, { state: nextState, stepHistory: history });
-      await completeFlow(executionId, row.flowName);
-      return { id: executionId, flowName: row.flowName, status: FlowStatus.Completed };
-    }
-
-    await guardedUpdate(executionId, {
-      state: nextState,
-      stepHistory: history,
-      currentStep: nextStep,
-    });
-    return { id: executionId, flowName: row.flowName, status: FlowStatus.Running };
   }
 
   /**
    * Resume a waiting flow (e.g., after an event arrives or approval granted).
    */
-  async function resume(executionId: string, signal?: unknown): Promise<void> {
+  async function resume(
+    executionId: string,
+    signal?: unknown,
+    expectedWaitToken?: string | null,
+  ): Promise<void> {
     const rows = await db
       .select()
       .from(flowExecutionsTable)
@@ -861,6 +892,8 @@ export function createFlowEngine(config: FlowEngineConfig) {
     const row = rows[0] as FlowExecutionRow | undefined;
     if (!row) throw new Error(`Flow execution "${executionId}" not found`);
 
+    if (expectedWaitToken !== undefined && row.leaseToken !== expectedWaitToken)
+      throw new LeaseLostError('Flow wait changed before signal delivery', { executionId });
     if (row.status !== FlowStatus.Waiting) {
       throw new Error(`Cannot resume flow "${executionId}" — current status is "${row.status}"`);
     }
@@ -868,18 +901,41 @@ export function createFlowEngine(config: FlowEngineConfig) {
     const flow = registry.get(row.flowName);
     if (!flow) throw new Error(`Flow "${row.flowName}" not registered`);
 
-    // Advance past the wait/delay step — set to created so claimNext picks it up
-    const nextStep = getNextStepName(flow.steps, row.currentStep ?? '');
+    if (!row.waitingForEvent && row.wakeAt && row.wakeAt.getTime() > Date.now()) {
+      throw new LeaseLostError('Timed flow wait is not due', { executionId });
+    }
 
-    await updateExecution(executionId, {
-      status: FlowStatus.Created,
-      currentStep: nextStep,
-      state: signal !== undefined ? signal : row.state,
-      waitingForEvent: null,
-      wakeAt: null,
-      leaseOwner: null,
-      leaseExpiresAt: null,
-    });
+    // Advance past the wait/delay step — set to created so claimNext picks it up
+    const nextStep = row.waitingForEvent
+      ? getNextStepName(flow.steps, row.currentStep ?? '')
+      : row.currentStep;
+
+    const resumed = await db
+      .update(flowExecutionsTable)
+      .set({
+        status: FlowStatus.Created,
+        currentStep: nextStep,
+        retryCount: row.waitKind === 'retry' ? row.retryCount : 0,
+        state: signal !== undefined ? signal : row.state,
+        waitingForEvent: null,
+        wakeAt: null,
+        leaseOwner: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+        waitKind: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(flowExecutionsTable.id, executionId),
+          eq(flowExecutionsTable.status, FlowStatus.Waiting),
+          row.leaseToken
+            ? eq(flowExecutionsTable.leaseToken, row.leaseToken)
+            : isNull(flowExecutionsTable.leaseToken),
+        ),
+      );
+    if (getRowsAffected(resumed) === 0)
+      throw new LeaseLostError('Flow changed while resuming', { executionId });
 
     await maybeEnqueueFlowStep(executionId, row.correlationId);
   }
@@ -890,38 +946,25 @@ export function createFlowEngine(config: FlowEngineConfig) {
    * Returns execution IDs resumed.
    */
   async function resumeWaitingByEvent(eventType: string, signal?: unknown): Promise<string[]> {
-    const result = await db.execute<{ id: string }>(sql`
-      UPDATE flow_executions
-      SET status = ${FlowStatus.Created},
-          waiting_for_event = NULL,
-          wake_at = NULL,
-          lease_owner = NULL,
-          lease_expires_at = NULL,
-          updated_at = now()
-      WHERE id IN (
-        SELECT id
-        FROM flow_executions
-        WHERE status = ${FlowStatus.Waiting}
-          AND waiting_for_event = ${eventType}
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING id
-    `);
-
-    const rows = result as unknown as { id: string }[];
-
-    // If a signal was provided, update state for each resumed execution
-    if (signal !== undefined) {
-      for (const row of rows) {
-        await updateExecution(row.id, { state: signal });
+    const waiting = await db
+      .select({ id: flowExecutionsTable.id, leaseToken: flowExecutionsTable.leaseToken })
+      .from(flowExecutionsTable)
+      .where(
+        and(
+          eq(flowExecutionsTable.status, FlowStatus.Waiting),
+          eq(flowExecutionsTable.waitingForEvent, eventType),
+        ),
+      );
+    const resumed: string[] = [];
+    for (const row of waiting) {
+      try {
+        await resume(row.id, signal, row.leaseToken);
+        resumed.push(row.id);
+      } catch (error) {
+        if (!(error instanceof LeaseLostError)) throw error;
       }
     }
-
-    for (const row of rows) {
-      await maybeEnqueueFlowStep(row.id);
-    }
-
-    return rows.map((row) => row.id);
+    return resumed;
   }
 
   /**
@@ -967,10 +1010,29 @@ export function createFlowEngine(config: FlowEngineConfig) {
     }
 
     assertTransition(row.status as FlowStatus, FlowStatus.Cancelled);
-    await updateExecution(executionId, {
-      status: FlowStatus.Cancelled,
-      completedAt: new Date(),
-    });
+    const cancelled = await db
+      .update(flowExecutionsTable)
+      .set({
+        status: FlowStatus.Cancelled,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+        leaseOwner: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+      })
+      .where(
+        and(
+          eq(flowExecutionsTable.id, executionId),
+          inArray(flowExecutionsTable.status, [
+            FlowStatus.Created,
+            FlowStatus.Running,
+            FlowStatus.Waiting,
+          ]),
+        ),
+      );
+    if (getRowsAffected(cancelled) === 0)
+      throw new FlowCancelledError(executionId, { reason: 'already_terminal' });
+    claims.delete(executionId);
 
     // Synchronously abort the step's AbortController if it is running in THIS
     // engine instance. Cross-process cancellations still converge via the next
@@ -1012,21 +1074,49 @@ export function createFlowEngine(config: FlowEngineConfig) {
     flow: FlowDefinition,
     history: StepHistoryEntry[],
     error?: string,
+    permanent = false,
   ): Promise<FlowExecution> {
-    const retryCount = row.retryCount + 1;
-    const maxRetries = flow.retry?.attempts ?? 0;
+    const retryCount = (row.retryCount ?? 0) + 1;
+    const { attempts, ...policy } = flow.retry ?? {};
+    const resolved = resolveRetryPolicy(policy, {
+      maxAttempts: (attempts ?? 0) + 1,
+      backoff: 'exponential',
+      baseDelayMs: 1000,
+      maxDelayMs: 60000,
+    });
 
-    if (retryCount <= maxRetries) {
-      // Retry: keep current step, increment counter
+    if (!permanent && retryCount < resolved.maxAttempts) {
+      const wakeAt = new Date(
+        (await databaseTime(db)).getTime() + retryDelay(resolved, retryCount),
+      );
       await guardedUpdate(executionId, {
         stepHistory: history,
         retryCount,
         lastError: error ?? null,
+        status: FlowStatus.Waiting,
+        waitKind: 'retry',
+        waitingForEvent: null,
+        wakeAt,
+        leaseOwner: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
       });
-      return { id: executionId, flowName: row.flowName, status: FlowStatus.Running };
+      try {
+        await onFlowDelayedSchedule?.(executionId, wakeAt, row.correlationId ?? executionId);
+      } catch {
+        logger?.error('Retry wake publication failed; database reconciliation will recover', {
+          executionId,
+        });
+      }
+      return { id: executionId, flowName: row.flowName, status: FlowStatus.Waiting };
     }
 
-    // Exhausted retries — fail the flow
+    // Persist the final failed attempt before terminal disposition.
+    await guardedUpdate(executionId, {
+      stepHistory: history,
+      retryCount,
+      lastError: error ?? null,
+    });
     await failFlow(executionId, row.flowName, error, row);
     return { id: executionId, flowName: row.flowName, status: FlowStatus.Failed };
   }
@@ -1037,6 +1127,7 @@ export function createFlowEngine(config: FlowEngineConfig) {
       currentStep: null,
       completedAt: new Date(),
       leaseOwner: null,
+      leaseToken: null,
       leaseExpiresAt: null,
     });
     if (!ok) return; // Lease lost — another worker owns this execution
@@ -1056,6 +1147,7 @@ export function createFlowEngine(config: FlowEngineConfig) {
       lastError: error ?? 'Unknown error',
       completedAt: new Date(),
       leaseOwner: null,
+      leaseToken: null,
       leaseExpiresAt: null,
     });
     if (!ok) return; // Lease lost — another worker owns this execution
@@ -1065,6 +1157,11 @@ export function createFlowEngine(config: FlowEngineConfig) {
         flowName,
         error,
       });
+    }
+    try {
+      await deadLetterFlow(db, executionId);
+    } catch {
+      logger?.error('Flow dead-letter persistence pending recovery', { executionId });
     }
     if (onFlowError) {
       try {
@@ -1083,80 +1180,68 @@ export function createFlowEngine(config: FlowEngineConfig) {
     }
   }
 
-  async function updateExecution(id: string, updates: FlowExecutionUpdate): Promise<void> {
-    await db
-      .update(flowExecutionsTable)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(flowExecutionsTable.id, id));
+  async function markFailedFromRunner(
+    executionId: string,
+    error: unknown,
+    leaseToken?: string,
+  ): Promise<boolean> {
+    if (error instanceof LeaseLostError || error instanceof FlowCancelledError || !leaseToken)
+      return false;
+    return claimScope.run({ id: executionId, token: leaseToken }, async () => {
+      try {
+        const rows = await db
+          .select()
+          .from(flowExecutionsTable)
+          .where(eq(flowExecutionsTable.id, executionId))
+          .limit(1);
+        const row = rows[0] as FlowExecutionRow | undefined;
+        if (!row) return false;
+        await failFlow(
+          executionId,
+          row.flowName,
+          error instanceof Error ? error.message : 'Runner failed',
+          row,
+        );
+        return true;
+      } catch (failure) {
+        if (failure instanceof LeaseLostError) return false;
+        throw failure;
+      }
+    });
   }
 
-  /**
-   * Finalize an execution as `failed` from the flow runner's perspective when
-   * `runNext` rejects with an unhandled error (e.g. `LeaseLostError` from a
-   * heartbeat). Without this, a zombie row left by a previously-crashed worker
-   * would be re-claimed by `claimNext` on every poll cycle (via the
-   * `status='running' AND lease_expires_at < now()` crash-recovery branch),
-   * retry forever, and pile up log noise.
-   *
-   * The guard is `status IN ('running','created','waiting')` (a set-guard, NOT
-   * a `lease_owner = workerId` check): on `LeaseLostError` the lease is by
-   * definition no longer ours, and we still want to stop the loop. A
-   * concurrent successful completion or an explicit `cancel()` will have
-   * already moved the row to a terminal status, and the `IN (...)` clause
-   * turns this call into a no-op in those races.
-   *
-   * Idempotent: second call on an already-finalized row is a no-op.
-   */
-  async function markFailedFromRunner(executionId: string, error: unknown): Promise<boolean> {
-    const message =
-      error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
+  async function guardedUpdate(id: string, updates: FlowExecutionUpdate): Promise<boolean> {
+    const claim = claimScope.getStore();
+    if (!claim || claim.id !== id)
+      throw new LeaseLostError('Missing flow claim', { executionId: id });
     const result = await db
       .update(flowExecutionsTable)
       .set({
-        status: FlowStatus.Failed,
-        lastError: message,
-        completedAt: new Date(),
-        leaseOwner: null,
-        leaseExpiresAt: null,
+        ...updates,
+        ...(updates.status === FlowStatus.Waiting ? { leaseToken: claim.token } : {}),
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(flowExecutionsTable.id, executionId),
-          inArray(flowExecutionsTable.status, [
-            FlowStatus.Running,
-            FlowStatus.Created,
-            FlowStatus.Waiting,
-          ]),
+          eq(flowExecutionsTable.id, id),
+          eq(flowExecutionsTable.leaseOwner, workerId),
+          eq(flowExecutionsTable.leaseToken, claim.token),
+          eq(flowExecutionsTable.status, FlowStatus.Running),
+          sql`${flowExecutionsTable.leaseExpiresAt} > now()`,
         ),
       );
-    const rowsAffected = getRowsAffected(result);
-    if (rowsAffected > 0 && audit) {
-      await audit.record('flow.runner.finalized', {
-        executionId,
+    if (getRowsAffected(result) === 0)
+      throw new LeaseLostError('Flow ownership lost while committing', {
+        executionId: id,
         workerId,
-        error: message,
       });
-    }
-    return rowsAffected > 0;
-  }
-
-  /**
-   * Update execution with lease ownership guard.
-   * Returns true if the update succeeded (we still own the lease),
-   * false if the lease was lost (0 rows affected).
-   */
-  async function guardedUpdate(id: string, updates: FlowExecutionUpdate): Promise<boolean> {
-    const result = await db
-      .update(flowExecutionsTable)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(and(eq(flowExecutionsTable.id, id), eq(flowExecutionsTable.leaseOwner, workerId)));
-    const rowsAffected = getRowsAffected(result);
-    return rowsAffected > 0;
+    if (updates.leaseToken === null && claims.get(id) === claim.token) claims.delete(id);
+    return true;
   }
 
   return {
     start,
+    wake: maybeEnqueueFlowStep,
     runNext,
     resume,
     resumeWaitingByEvent,

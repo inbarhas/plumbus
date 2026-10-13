@@ -9,7 +9,12 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { documentChunksTable, documentsTable } from '../ai/rag/schema.js';
 import { auditRecords } from '../audit/schema.js';
 import { deadLetterTable, idempotencyTable, outboxTable } from '../events/outbox.js';
-import { flowDeadLetterTable, flowExecutionsTable, flowSchedulesTable } from '../flows/schema.js';
+import {
+  flowDeadLetterTable,
+  flowExecutionsTable,
+  flowSchedulesTable,
+  flowScheduleTicksTable,
+} from '../flows/schema.js';
 import { jobExecutionsTable } from '../jobs/schema.js';
 import type { EntityDefinition } from '../types/entity.js';
 import { generateDrizzleSchema } from './schema-generator.js';
@@ -275,6 +280,8 @@ export function collectSchemas(
   tableNames.add(getTableName(flowExecutionsTable));
   schemas.__flow_dead_letter = flowDeadLetterTable as unknown as PgTableWithColumns<any>;
   tableNames.add(getTableName(flowDeadLetterTable));
+  schemas.__flow_schedule_ticks = flowScheduleTicksTable as unknown as PgTableWithColumns<any>;
+  tableNames.add(getTableName(flowScheduleTicksTable));
   schemas.__flow_schedules = flowSchedulesTable as unknown as PgTableWithColumns<any>;
   tableNames.add(getTableName(flowSchedulesTable));
   schemas.__job_executions = jobExecutionsTable as unknown as PgTableWithColumns<any>;

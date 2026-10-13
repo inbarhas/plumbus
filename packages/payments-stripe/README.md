@@ -1,11 +1,13 @@
 # @plumbus/payments-stripe
 
+Release **0.3.0** belongs to the core 0.8 stabilization family. See the [changelog](./CHANGELOG.md) and [upgrade guide](../../docs/upgrading-stabilization.md) before updating an existing app.
+
 > **Stripe for [Plumbus](https://github.com/plumbus-framework/plumbus) payments.** The Stripe provider for [`@plumbus/payments`](../payments/): Connect for sellers, Checkout, invoices, subscriptions, and Stripe Billing for your own plans, on Stripe's newest APIs.
 
 [![npm](https://img.shields.io/npm/v/@plumbus/payments-stripe.svg)](https://www.npmjs.com/package/@plumbus/payments-stripe)
 [![license](https://img.shields.io/npm/l/@plumbus/payments-stripe.svg)](https://github.com/plumbus-framework/plumbus/blob/main/LICENSE)
-[![peer: @plumbus/core 0.7.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.7.x-blue)](https://www.npmjs.com/package/@plumbus/core)
-[![peer: @plumbus/payments 0.2.x](https://img.shields.io/badge/peer-%40plumbus%2Fpayments%200.2.x-blue)](https://www.npmjs.com/package/@plumbus/payments)
+[![peer: @plumbus/core 0.8.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.8.x-blue)](https://www.npmjs.com/package/@plumbus/core)
+[![peer: @plumbus/payments 0.3.x](https://img.shields.io/badge/peer-%40plumbus%2Fpayments%200.3.x-blue)](https://www.npmjs.com/package/@plumbus/payments)
 
 ## What is this?
 
@@ -52,7 +54,7 @@ Pinned to Stripe API version **`2026-08-26.dahlia`** through the official `strip
 
 ## Status
 
-Stripe provider for `@plumbus/payments`, version `0.2.2` (version-locked **`0.2.x`**); peers `@plumbus/core` **`0.7.x`** and `@plumbus/payments` **`0.2.x`**; `stripe` 22.x is a dependency. A platform without sellers (billing only) needs no Stripe Connect with `@plumbus/payments` 0.2.1+. Tested offline with Stripe-signed events and an HTTP stub, and end to end on the real Plumbus runtime against a local Stripe simulator by [`examples/payments-connect-app`](../../examples/payments-connect-app/) (28 scenarios).
+Stripe provider for `@plumbus/payments`, version `0.3.0` (version-locked **`0.3.x`**); peers `@plumbus/core` **`0.8.x`** and `@plumbus/payments` **`0.3.x`**; `stripe` 22.x is a dependency. A platform without sellers (billing only) needs no Stripe Connect with `@plumbus/payments` 0.2.1+. Tested offline with Stripe-signed events and an HTTP stub, and end to end on the real Plumbus runtime against a local Stripe simulator by [`examples/payments-connect-app`](../../examples/payments-connect-app/) (28 scenarios).
 
 Not supported, by design: OAuth "connect an existing Stripe account" (v1-only), legacy Standard/Express/Custom account types, and private-preview features.
 
@@ -62,7 +64,7 @@ Not supported, by design: OAuth "connect an existing Stripe account" (v1-only), 
 pnpm add @plumbus/payments @plumbus/payments-stripe
 ```
 
-Peers: `@plumbus/core` **`0.7.x`**, `@plumbus/payments` **`0.2.x`**. Copy them literally; see `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
+Peers: `@plumbus/core` **`0.8.x`**, `@plumbus/payments` **`0.3.x`**. Copy them literally; see `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
 
 If agent wiring predates the payments instructions, refresh:
 

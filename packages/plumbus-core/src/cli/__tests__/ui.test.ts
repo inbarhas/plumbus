@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { CapabilityContract } from '../../types/capability.js';
@@ -10,6 +14,7 @@ import {
   generateUiModuleFiles,
   type UiGeneratorModule,
 } from '../commands/ui.js';
+import { resolveVitest } from '../commands/test.js';
 
 function mockCapability(overrides: Partial<CapabilityContract> = {}): CapabilityContract {
   return {
@@ -116,7 +121,41 @@ describe('plumbus ui helpers', () => {
 
     expect(config).toContain('export default {');
     expect(config).not.toContain('vitest/config');
+    expect(config).toContain('maxWorkers: 1');
+    expect(config).toContain('fileParallelism: false');
+    expect(config).not.toContain('poolOptions');
   });
+
+  it('discovers E2E tests without collecting the generated config as a test', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'plumbus-vitest-discovery-'));
+    try {
+      const configPath = join(directory, 'vitest.config.e2e.ts');
+      writeFileSync(configPath, generateE2EVitestConfig('http://localhost:3001'));
+      writeFileSync(join(directory, 'home.e2e.ts'), '// discovered without executing test code\n');
+      const output = execFileSync(
+        process.execPath,
+        [
+          resolveVitest().bin,
+          'list',
+          '--config',
+          configPath,
+          '--configLoader',
+          'runner',
+          '--root',
+          directory,
+          '--filesOnly',
+          '--json',
+        ],
+        { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      const files = JSON.parse(output) as unknown[];
+      expect(files).toHaveLength(1);
+      expect(output).toContain('home.e2e.ts');
+      expect(output).not.toContain('vitest.config.e2e.ts');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15000);
 
   it('passes splitLocaleBundles to the translation generator', () => {
     const translations: TranslationDefinition[] = [

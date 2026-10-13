@@ -1,8 +1,10 @@
 # @plumbus/payments-stripe — Framework
 
+Current release: **0.3.0**, in the core **0.8.x** stabilization family. Follow `node_modules/@plumbus/core/instructions/stabilization.md` before upgrading, then run `plumbus init --patch --agent all` for wiring **v21**. Historical feature introduction versions below do not replace the current peer requirements.
+
 `stripeProvider()` implements the `@plumbus/payments` provider contract with Stripe Connect and Stripe Billing. The app never imports `stripe` for money movement; it calls the payments capabilities and helpers.
 
-**Peers:** `"@plumbus/core": "0.7.x"`, `"@plumbus/payments": "0.2.x"` — copy literally. The official `stripe` SDK (22.x) is a dependency of this package; do not add it to the app.
+**Peers:** `"@plumbus/core": "0.8.x"`, `"@plumbus/payments": "0.3.x"` — copy literally. The official `stripe` SDK (22.x) is a dependency of this package; do not add it to the app.
 
 ## Stripe APIs used (newest only)
 

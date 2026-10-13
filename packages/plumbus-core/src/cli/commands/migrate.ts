@@ -6,7 +6,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Command } from 'commander';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { loadConfig } from '../../config/loader.js';
+import { loadAppConfig } from '../../config/index.js';
 import {
   extractCreateTableNames,
   FRAMEWORK_TABLE_NAMES,
@@ -49,7 +49,7 @@ async function connectDb(
   dbOverride?: string,
 ): Promise<{ db: PostgresJsDatabase; close: () => Promise<void> } | null> {
   try {
-    const config = loadConfig({});
+    const config = await loadAppConfig({});
     const { drizzle } = await import('drizzle-orm/postgres-js');
     const postgres = (await import('postgres')).default;
     const sql = postgres({
@@ -71,7 +71,7 @@ async function connectDb(
  */
 async function ensureDatabase(dbName: string): Promise<boolean> {
   try {
-    const config = loadConfig({});
+    const config = await loadAppConfig({});
     const postgres = (await import('postgres')).default;
     const sql = postgres({
       host: config.database.host,
@@ -450,7 +450,7 @@ export function registerMigrateCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .option('--create-db', 'Create the database if it does not exist')
     .action(async (opts: MigrateOptions & { createDb?: boolean }) => {
-      const config = loadConfig({});
+      const config = await loadAppConfig({});
       const dbName = config.database.database;
 
       if (opts.createDb) {
@@ -586,7 +586,7 @@ export function registerMigrateCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .option('--create-db', 'Create the database if it does not exist')
     .action(async (opts: MigrateOptions & { createDb?: boolean }) => {
-      const config = loadConfig({});
+      const config = await loadAppConfig({});
       const dbName = config.database.database;
 
       if (opts.createDb) {
@@ -814,7 +814,7 @@ export function registerDbCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .option('--test', 'Also create a separate test database (<dbname>_test)')
     .action(async (opts: MigrateOptions & { test?: boolean }) => {
-      const config = loadConfig({});
+      const config = await loadAppConfig({});
       const dbName = config.database.database;
 
       try {
@@ -860,7 +860,7 @@ export function registerDbCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .option('--test', 'Reset the test database instead')
     .action(async (opts: MigrateOptions & { test?: boolean }) => {
-      const config = loadConfig({});
+      const config = await loadAppConfig({});
       const baseDbName = config.database.database;
       const dbName = opts.test ? `${baseDbName}_test` : baseDbName;
 

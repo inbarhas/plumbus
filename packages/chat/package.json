@@ -1,7 +1,7 @@
 {
   "name": "@plumbus/chat",
-  "version": "0.2.2",
-  "description": "Plumbus chat primitive — policy, context sources, guards, budgets, evals.",
+  "version": "0.3.0",
+  "description": "Plumbus chat primitive \u2014 policy, context sources, guards, budgets, evals.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,17 +47,17 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20.6.0"
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   },
   "peerDependencies": {
-    "@plumbus/core": "0.7.x",
-    "@plumbus/knowledge-base": "0.2.x"
+    "@plumbus/core": "0.8.x",
+    "@plumbus/knowledge-base": "0.3.x"
   },
   "devDependencies": {
     "@plumbus/core": "workspace:*",
     "@plumbus/knowledge-base": "workspace:*",
     "fastify": "^5.0.0",
-    "vitest": "^3.2.4"
+    "vitest": "5.0.4"
   },
   "peerDependenciesMeta": {
     "fastify": {

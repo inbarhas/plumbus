@@ -1,5 +1,7 @@
 # @plumbus/ui
 
+Release **0.9.0** belongs to the core 0.8 stabilization family. See the [changelog](./CHANGELOG.md) and [upgrade guide](../../docs/upgrading-stabilization.md) before updating an existing app.
+
 UI source-code generation for the Plumbus framework.
 
 `@plumbus/ui` turns Plumbus capability contracts, flow trigger descriptors, auth configuration, capability input schemas, Next.js template configuration, and translation definitions into frontend source files. The package is primarily a generator package: it does not provide a visual component library, application shell runtime, or production UI kit.

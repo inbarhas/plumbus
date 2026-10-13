@@ -189,6 +189,7 @@ describe('EventWorker', () => {
       queue: createInMemoryQueue(),
       consumers,
       idempotency: idemp,
+      unrouted: 'acknowledge',
     });
 
     // Should not throw

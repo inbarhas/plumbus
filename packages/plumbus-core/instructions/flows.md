@@ -6,7 +6,7 @@ A flow is a multi-step workflow that orchestrates capabilities in sequence, with
 
 ```ts
 import { defineFlow } from "@plumbus/core";
-import { z } from "zod";
+import { z } from "@plumbus/core/zod";
 
 export const refundApproval = defineFlow({
   name: "refundApproval",
@@ -25,7 +25,7 @@ export const refundApproval = defineFlow({
   ],
 
   trigger: { event: "refund.requested" },
-  retry: { attempts: 3, backoff: "exponential" },
+  retry: { maxAttempts: 3, backoff: "exponential" },
 });
 ```
 
@@ -93,8 +93,12 @@ When the named event fires, a new flow execution starts with the event payload m
 
 ### Scheduled
 ```ts
-schedule: { cron: "0 9 * * MON" }   // Every Monday at 9 AM
+schedule: { cron: "0 9 * * MON", timezone: "UTC", firstRun: "next", overlap: "skip" }
 ```
+
+Scheduled flows receive `{}` under scheduler auth: use `input: z.object({})` or defaults. New schedules default to an immediate first run on the next poll; `firstRun: "next"` waits for the first boundary. Default overlap is allowed and the default timezone is process-local. An expired lease does not make a previous execution finished. Core owns the cron parser.
+
+Startup seeds the initial schedule set only; use deployment reconciliation for subsequent additions. Use `plumbus flow schedule sync` to preview definition changes/removal, then `--apply --expected-revision <revision>` from one deployment owner. Persisted overrides are reviewed during adoption; disabled schedules stay disabled. Inspect `plumbus flow schedule list --json`. Read `deployment.md` and `stabilization.md` before scaling schedulers or upgrading existing rows.
 
 ### Manual
 ```ts
@@ -106,7 +110,7 @@ await ctx.flows.start("refundApproval", { refundId: "rf_123", amount: 150 });
 
 ```ts
 retry: {
-  attempts: 3,        // Max retry attempts per failed step
+  maxAttempts: 3,    // Total calls per step activation; legacy attempts: N means N retries
   backoff: "exponential"  // "exponential" or "fixed"
 }
 ```
@@ -115,7 +119,7 @@ Steps that fail with transient errors are retried. Permanent failures stop the f
 
 ## Flow Lifecycle
 
-`created → running → waiting → running → completed | failed`
+`created → running → waiting → running → completed | failed | cancelled`
 
 - Steps execute sequentially (except `parallel`)
 - Every step produces an audit record
@@ -123,3 +127,14 @@ Steps that fail with transient errors are retried. Permanent failures stop the f
 
 
 Core 0.7.0 rejects missing, malformed, or actor/tenant-inconsistent stored auth snapshots before a step executes. New snapshots omit session IDs and authentication timestamps. Do not recover legacy rows by injecting worker/system roles; follow [the security release checklist](./upgrading-security-release.md) with a verified initiating identity and a review of prior effects.
+
+
+## Cancellation, retries, and replay
+
+Retries persist their wake time and release the worker. Each successful step advancement resets the retry budget. Cancellation invalidates ownership and signals `ctx.signal`; it cannot undo an external effect. Make side effects idempotent.
+
+Failed executions automatically receive a dead-letter snapshot, with a recovery sweep if copying fails. `plumbus flow dead-letter list` lists those snapshots. `plumbus flow dead-letter retry <executionId>` creates a new replay at the failed step and returns its ID; the failed original remains immutable. Concurrent requests reuse the same replay ID. Invalid original auth or incompatible current step/state prevents replay.
+
+Flow capabilities can enqueue jobs through `ctx.jobs.enqueue()` with restored caller identity. Built-in transactions persist job intent before commit and publish afterward; queued work remains recoverable after broker failures. A returned ID means acceptance, not completion. Synchronous job-capability steps remain unsupported.
+
+Wait signals are fenced to their original waiting activation; a stale signal cannot advance a later activation of the same wait. Retry and schedule deadlines use database time, and Redis visibility uses Redis time.

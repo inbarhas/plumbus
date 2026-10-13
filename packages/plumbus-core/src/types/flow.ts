@@ -1,3 +1,4 @@
+import type { RetryPolicy } from '../config/index.js';
 import type { z } from 'zod';
 import type { BackoffStrategy, FlowStepType } from './enums.js';
 import type { RegisteredCapabilityName, RegisteredEventName } from './registry.js';
@@ -49,9 +50,10 @@ export type FlowStep =
   | EventEmitStep;
 
 // ── Flow Retry Policy ──
-export interface FlowRetryPolicy {
-  attempts: number;
-  backoff: BackoffStrategy;
+export interface FlowRetryPolicy extends RetryPolicy {
+  /** @deprecated Legacy retry count, excluding the first call. Use maxAttempts. */
+  attempts?: number;
+  backoff?: BackoffStrategy;
 }
 
 // ── Flow Trigger ──
@@ -62,6 +64,9 @@ export interface FlowTrigger {
 // ── Flow Schedule ──
 export interface FlowSchedule {
   cron: string;
+  timezone?: string;
+  firstRun?: 'immediate' | 'next';
+  overlap?: 'allow' | 'skip';
 }
 
 // ── Flow Definition ──

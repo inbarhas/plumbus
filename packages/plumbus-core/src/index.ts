@@ -161,6 +161,8 @@ export {
   verifyPassword,
   wrapAuthAdapter,
 } from './auth/index.js';
+export { loadAppConfig } from './config/index.js';
+export type { ConfigOverrides } from './config/index.js';
 export type { ConfigLoadOptions, ConfigValidationResult } from './config/index.js';
 // ── Config Loader ──
 export { loadConfig, parseDurationToMs, validateConfig } from './config/index.js';
@@ -554,3 +556,6 @@ export {
   securityRules,
   workerRules,
 } from './governance/index.js';
+
+export type { RetryPolicy } from './config/index.js';
+export type { EventDeliveryOptions, EventDeadLetterInfo } from './events/index.js';

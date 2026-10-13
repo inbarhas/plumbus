@@ -10,7 +10,7 @@ import {
   type DatabaseConnection,
 } from '../../data/connection.js';
 import { PromptRegistry } from '../../ai/prompt-registry.js';
-import { loadConfig, validateConfig } from '../../config/loader.js';
+import { loadAppConfig, validateConfig } from '../../config/index.js';
 import { EntityRegistry } from '../../data/registry.js';
 import { ConsumerRegistry } from '../../events/consumer-registry.js';
 import { EventRegistry } from '../../events/registry.js';
@@ -53,7 +53,7 @@ export async function startProductionServer(
   server?: PlumbusServer;
   shutdown: () => Promise<void>;
 }> {
-  const config = loadConfig({ environment: 'production' });
+  const config = await loadAppConfig({ environment: 'production' });
   const validation = validateConfig(config);
 
   if (!validation.valid) {
@@ -139,6 +139,7 @@ export async function startProductionServer(
       enableStrictStructuredOutputs: extensions.enableStrictStructuredOutputs,
       authenticationRuntime: extensions.authenticationRuntime,
       jobQueue: jobQueueNeeded ? queues.jobs : undefined,
+      checkQueueReadiness: queues.isDurable ? queues.pingRedis : undefined,
       metrics,
       ...(process.env.TRUST_PROXY && {
         trustProxy: process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY,

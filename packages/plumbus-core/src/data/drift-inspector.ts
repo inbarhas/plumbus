@@ -19,6 +19,7 @@ export const FRAMEWORK_TABLE_NAMES = [
   'flow_executions',
   'flow_dead_letter',
   'flow_schedules',
+  'flow_schedule_ticks',
   'job_executions',
   'documents',
   'document_chunks',
