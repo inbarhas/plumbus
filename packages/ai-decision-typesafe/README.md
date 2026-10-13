@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/@plumbus/ai-decision-typesafe.svg)](https://www.npmjs.com/package/@plumbus/ai-decision-typesafe)
 [![license](https://img.shields.io/npm/l/@plumbus/ai-decision-typesafe.svg)](https://github.com/plumbus-framework/plumbus/blob/main/LICENSE)
-[![peer: @plumbus/core 0.7.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.7.x-blue)](https://www.npmjs.com/package/@plumbus/core)
+[![peer: @plumbus/core 0.8.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.8.x-blue)](https://www.npmjs.com/package/@plumbus/core)
 
 ## What is this?
 
@@ -45,11 +45,11 @@ This package gives apps that use TypeSafe's hosted Jev models a registered decis
 
 ## Status
 
-Optional decision provider, version `0.2.3` (version-locked **`0.2.x`**); required peer `@plumbus/core` exactly **`0.7.x`**; Node.js 20.6+. **Runtime floor:** `ctx.ai.decide()` needs `@plumbus/core` **≥ 0.7.3** and `ctx.ai.classify({ provider })` needs **≥ 0.7.4**; agent wiring **v17** (core 0.7.4+) links these instructions. Depends on `@plumbus/ai-decision` `~0.2.3`. Install alone is not enough until the adapter is registered under `decisions.providers`.
+Optional decision provider, version `0.3.0` (version-locked **`0.3.x`**); required peer `@plumbus/core` exactly **`0.8.x`**; Node 22.12+ on the 22.x line, Node 24.x, or Node 26+. Core 0.8 and the provider packages use shared contracts `~0.3.0`. Refresh agent wiring to **v21** with `plumbus init --patch --agent all`. Install alone does not register the adapter: configure `decisions.providers` at the server boundary.
 
 Not included: vendor model catalogs, automatic environment provider discovery, and dedicated decision CLI commands.
 
-Release notes: [changelog](./CHANGELOG.md) and [version/upgrade guide](../../docs/upgrading-classification.md).
+Release notes: [changelog](./CHANGELOG.md) and [version/upgrade guide](../../docs/upgrading-stabilization.md).
 
 ## Install
 
@@ -60,7 +60,7 @@ pnpm add @plumbus/ai-decision-typesafe
 Install explicitly with `pnpm add @plumbus/ai-decision-typesafe`. Provider packages install
 `@plumbus/ai-decision` transitively. There is no dependency on the other decision providers.
 
-Peer (copy literally): `@plumbus/core` `0.7.x`. See `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
+Peer (copy literally): `@plumbus/core` `0.8.x`. See `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
 
 If agent wiring predates the decision provider instructions, refresh:
 

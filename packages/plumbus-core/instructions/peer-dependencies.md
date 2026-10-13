@@ -2,27 +2,27 @@
 
 Read this file before editing `peerDependencies` in any `packages/*/package.json`.
 
-## Security release family — explicit upgrade required
+## Stabilization release family — explicit upgrade required
 
-Core **0.7.x**, UI **0.8.x**, MCP **0.6.x**, voice **0.5.x**, and the remaining add-ons **0.2.x** form one coordinated release family. This is an intentional migration boundary: legacy caret ranges must not install these packages, and new packages must not accept legacy Plumbus peers. Do not widen these ranges to admit old core/voice lines just to make an installation pass.
+Core **0.8.x**, UI **0.9.x**, MCP **0.7.x**, voice **0.6.x**, and the remaining add-ons **0.3.x** form the stabilization family. Read [stabilization.md](./stabilization.md) before upgrading. Migrate durable flow, scheduler, and job records; drain old flow-mutating API/worker processes before activation. Do not mix old and new schedulers or workers against the same queues.
 
-The previous family remains on core 0.6.x, UI 0.7.x, MCP 0.5.x, voice 0.4.x, and add-ons 0.1.x. Historical feature floors are not peer contracts for the new release.
+The previous family remains core 0.7.x, UI 0.8.x, MCP 0.6.x, voice 0.5.x, and add-ons 0.2.x. Historical feature floors describe earlier releases, not current peer declarations.
 
 ## Canonical literals — copy exactly
 
 | Declaring package | Peer target | Literal |
 | --- | --- | --- |
-| Every add-on that peers on core | `@plumbus/core` | `"0.7.x"` |
-| `@plumbus/core` | `@plumbus/mcp` | `"0.6.x"` (optional) |
-| `@plumbus/core` | `@plumbus/api` | `"0.2.x"` (optional) |
-| `@plumbus/core` | `@plumbus/ai-bedrock` | `"0.2.x"` (optional) |
-| `@plumbus/chat` | `@plumbus/knowledge-base` | `"0.2.x"` (optional) |
-| `@plumbus/chat-ui` | `@plumbus/chat` | `"0.2.x"` |
-| `@plumbus/auth-cognito` | `@plumbus/auth` | `"0.2.x"` |
-| `@plumbus/payments-stripe` | `@plumbus/payments` | `"0.2.x"` |
-| Every `@plumbus/voice-*` provider | `@plumbus/voice` | `"0.5.x"` |
+| Every add-on that peers on core | `@plumbus/core` | `"0.8.x"` |
+| `@plumbus/core` | `@plumbus/mcp` | `"0.7.x"` (optional) |
+| `@plumbus/core` | `@plumbus/api` | `"0.3.x"` (optional) |
+| `@plumbus/core` | `@plumbus/ai-bedrock` | `"0.3.x"` (optional) |
+| `@plumbus/chat` | `@plumbus/knowledge-base` | `"0.3.x"` (optional) |
+| `@plumbus/chat-ui` | `@plumbus/chat` | `"0.3.x"` |
+| `@plumbus/auth-cognito` | `@plumbus/auth` | `"0.3.x"` |
+| `@plumbus/payments-stripe` | `@plumbus/payments` | `"0.3.x"` |
+| Every `@plumbus/voice-*` provider | `@plumbus/voice` | `"0.6.x"` |
 
-UI 0.8.0 replaces its direct core dependency with the required peer `"@plumbus/core": "0.7.x"` and uses `workspace:*` only for development. This prevents npm from accepting old application core plus a hidden new core nested inside UI. Install core and UI together. All Plumbus packages share the application runtime through peers.
+UI 0.9.x uses the required peer `"@plumbus/core": "0.8.x"` and `workspace:*` only for development. This prevents npm from accepting old application core plus a hidden new core nested inside UI. Install core and UI together. All Plumbus packages share the application runtime through peers.
 
 Voice does not peer on vendor add-ons. Apps explicitly install only providers they use, register their `*_REGISTRATION` through `createProviderRegistry()`, and pass that registry to routes/workers.
 
@@ -42,4 +42,4 @@ Run lint, format checking, typechecking, tests, and packed npm install checks be
 
 ## Consumer upgrade
 
-Read [upgrading-security-release.md](./upgrading-security-release.md), explicitly select the new package versions for every installed Plumbus add-on, and run `plumbus init --patch --agent all` for current agent wiring (**v19** with core 0.7.9+; v17 added the classification recipe). For classification/provider/model selection, read [ai-classification.md](./ai-classification.md). Keep application business logic in Plumbus primitives and `ctx.*`; do not bypass security checks to make a migration pass.
+Read [stabilization.md](./stabilization.md) and [upgrading-security-release.md](./upgrading-security-release.md), explicitly select the new package versions for every installed Plumbus add-on, and run `plumbus init --patch --agent all` for current agent wiring (**v21** with core 0.8.0+; v17 added the classification recipe). For classification/provider/model selection, read [ai-classification.md](./ai-classification.md). Keep application business logic in Plumbus primitives and `ctx.*`; do not bypass security checks to make a migration pass.

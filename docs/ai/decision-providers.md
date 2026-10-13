@@ -1,7 +1,7 @@
 # Typed decision provider packages
 
-Core **0.7.3+** integrates typed decisions through `ctx.ai.decide()`. Use shared
-`@plumbus/ai-decision@0.2.1+` (0.2.3+ for OpenAI) and the matching TypeSafe, Laya, or
+Core integrates typed decisions through `ctx.ai.decide()` (introduced in 0.7.3).
+Current installations use core **0.8.x**, shared `@plumbus/ai-decision` **0.3.x**, and the matching TypeSafe, Laya, or
 OpenAI Decisions adapter for named contracts, validation, security, budgets,
 cancellation, and per-call cost records. The decision packages still work
 independently for infrastructure tests. Register decision adapters separately from
@@ -14,18 +14,15 @@ text-generation providers.
 | `@plumbus/ai-decision-laya` | Laya HTTP adapter and a separately deployed Python reference service |
 | `@plumbus/ai-decision-openai` | OpenAI Decisions API (`POST /v1/decisions`) adapter and `gpt-6-luna` input pricing |
 
-The decision packages peer on core `0.7.x`. Core 0.7.4 and the 0.2.2 provider packages
-depend on shared contracts `~0.2.2`; core 0.7.9 and the 0.2.3 TypeSafe and Laya packages
-depend on `~0.2.3`. No provider depends
-on another. Node.js 20.6+ is required. Only the Laya service needs Python/model
-dependencies. The TypeSafe and OpenAI adapters call the documented HTTP endpoints
-directly, using the shared transport; consumer apps do not need a vendor SDK.
-`@plumbus/ai-decision-openai` 0.2.0 needs shared contracts `~0.2.3` for the transport's
-endpoint-path option and adapter-declared rounding. Core checks every result again with
-the copy it loads, so that copy must be 0.2.3+ as well. Use core 0.7.9, or on core
-0.7.3–0.7.8 run `pnpm dedupe` after installing the adapter and check that
-`pnpm why @plumbus/ai-decision` lists a single 0.2.3+ copy. Otherwise core rejects
-OpenAI's rounded answers as `invalid_response` after the call is billed.
+The decision packages peer on core `0.8.x`. Core 0.8 and all 0.3 provider packages
+depend on shared contracts `~0.3.0`; providers do not depend on one another. Node 22.12+ on the 22.x line, Node 24.x, or Node 26+ is required. Only the Laya service needs Python/model dependencies. TypeSafe
+and OpenAI use the shared HTTP transport; consumer apps need no vendor SDK.
+
+Core re-validates results with its own shared-contract copy, so keep the core and
+provider families aligned. The 0.3 contracts retain the endpoint-path and rounding
+support introduced in 0.2.3. See the [stabilization upgrade guide](../upgrading-stabilization.md)
+for current versions and the [historical classification guide](../upgrading-classification.md)
+for deployments staying on core 0.7.
 
 For the researched issue matrix, regressions and local HTTP end-to-end coverage,
 see the [58-scenario first audit](decision-provider-audit.md).
@@ -140,9 +137,9 @@ primitives; decision probabilities never authorize an action by themselves.
 
 Requires core **0.7.4+**. Coding agents should start with the packaged
 [classification recipe](../../packages/plumbus-core/instructions/ai-classification.md);
-see the [upgrade guide](../upgrading-classification.md) for wiring v17. Core 0.7.9
-generates wiring v19, which also links the OpenAI Decisions provider index
-([agent setup](../agents/agent-setup.md#openai-decisions-provider--wiring-v19)).
+Current core 0.8 generates wiring v21, retaining the classification recipe
+introduced in v17 and the OpenAI Decisions provider index added in v19. See
+[agent setup](../agents/agent-setup.md#stabilization-wiring-v21).
 
 Use `classify()` when you only need matching labels; keep `decide()` for typed
 choices, scores, probabilities, or several different questions in one request.

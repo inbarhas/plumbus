@@ -1,8 +1,10 @@
 # @plumbus/auth
 
+Release **0.3.0** belongs to the core 0.8 stabilization family. See the [changelog](./CHANGELOG.md) and [upgrade guide](../../docs/upgrading-stabilization.md) before updating an existing app.
+
 OIDC relying-party runtime for Plumbus applications: hosted login redirect, authorization code + PKCE callback, opaque **`__Host-plumbus_session`** cookies, CSRF for mutating requests, and protected session/transaction stores (memory or PostgreSQL).
 
-Peer: `@plumbus/core` at **`0.7.x`**.
+Peer: `@plumbus/core` at **`0.8.x`**.
 
 ## Install
 

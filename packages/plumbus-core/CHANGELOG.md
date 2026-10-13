@@ -1,5 +1,25 @@
 # @plumbus/core changelog
 
+## 0.8.0 — Stabilization compatibility family
+
+- Upgrade the framework test toolchain to **Vitest 5.0.4** and require Node 22.12+ on the 22.x line, Node 24.x, or Node 26+. Core owns the required Vite dependency (`^7.3.7`); update worker settings and existing E2E configs as described in the [Vitest migration guide](../../docs/upgrading-vitest.md). `plumbus doctor` checks the new Node floor. Generated E2E configs explicitly exclude config files from test discovery; a real Vitest discovery regression covers this.
+
+**Agent wiring v21:** make `AGENTS.md` canonical and generate a managed `@AGENTS.md` import in `CLAUDE.md`. Claude-only setup creates both files; inline recipes live in `AGENTS.md`. Patch v20 clones with `plumbus init --patch --agent all`, preserving app-owned notes. Doctor checks imported targets and cycles; generators preserve symlinks rather than writing through them.
+
+**Upgrade required:** migrate the database and drain old flow-mutating API processes, workers, and schedulers before activating this version. Install the coordinated package family and follow the [application upgrade checklist](./instructions/stabilization.md) and [full migration guide](../../docs/upgrading-stabilization.md). Old and new workers must not process the same queues concurrently.
+
+- **PLB-01 — event delivery:** expose worker retry policy and the `onEventDeadLetter` hook, report polling failures, and persist dead letters before terminal audit/notification. `onCapabilityError` remains per failed capability attempt.
+- **PLB-02 — Redis startup:** distinguish missing driver from connection/authentication failures; bound startup, operations, and shutdown. Once Redis is selected, failures do not select memory. Deliberate development/memory modes remain available.
+- **PLB-03 — flow ownership:** fence state transitions with unique claim tokens, active status, and lease expiry. Cancellation invalidates the claim; stale runners cannot finalize another worker's execution. External effects remain at-least-once.
+- **PLB-04 — scheduler races:** create a durable unique tick, flow execution, and next-run update in one transaction; recover processing through database polling if queue notification fails.
+- **PLB-05 — unhandled events:** default unmatched events to persisted dead letters. Configure intentional omissions with `ignoredEventTypes` or explicit `unrouted: 'acknowledge'`. Document competing consumers and queue namespace requirements.
+- **PLB-06 — Redis recovery:** atomically claim/reclaim/renew deliveries, renew active work, quarantine invalid envelopes, and retain recoverable work when acknowledgement or transfer fails.
+- **PLB-07 — flow retries:** persist retry deadlines and reset the budget after successful step advancement. `maxAttempts` counts total calls; legacy flow `attempts` still counts retries and legacy event `maxRetries` still counts total calls. Add automatic flow dead letters and replay into a new execution at the failed step.
+- **PLB-08 — schedule definitions:** provide strict core-owned cron parsing, timezone/first-run/overlap options, and revision-checked `plumbus flow schedule sync`. Startup seeds only the initial schedule set; later changes require explicit reconciliation and retain disabled/tombstoned records.
+- **PLB-09 — flow job dispatch:** wire `ctx.jobs.enqueue()` with restored caller identity and persist dispatch intent inside built-in transactions. Recover committed publication failures without losing accepted jobs. Synchronous job steps remain unsupported.
+- **PLB-10 — configuration:** validate and merge nested overrides; load `config/app.config.ts`, `.js`, or `.mjs` across CLI startup and operational commands. Precedence is defaults, file, environment, explicit options; CLI-forced environment wins. Previously ignored files now take effect.
+- **Agent instructions:** wiring v21 links deployment and stabilization guidance in all four agent formats; `--inline` embeds core instructions. Update consumer recipes, compatibility ranges, and migration guidance while preserving framework-first application development.
+
 ## 0.7.9 — 2026-10-08
 
 - Fix `plumbus e2e` freezing the frontend dev server partway through a long run. The server's stdout was piped but never read, and `next dev` writes a line there for every request with stdout in blocking mode, so after about 80 KB (roughly 1,000 page loads) the server blocked in that write for good. The test in flight timed out at its 30 s limit and every later test would too, which looked like one random late test failing. The runner now reads and discards that stream; stderr is still relayed as `[frontend]` lines.

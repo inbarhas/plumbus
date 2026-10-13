@@ -14,6 +14,7 @@ The `plumbus` CLI provides commands for scaffolding, development, governance, mi
 | `plumbus events` | Outbox status, dead-letter ops, event replay |
 | `plumbus flow dead-letter` | List and retry failed flow executions |
 | `plumbus flow schedule list` | List scheduled flows with cron and next/last run times |
+| `plumbus flow schedule sync` | Preview or apply revision-checked schedule reconciliation |
 | `plumbus doctor` | Check environment readiness |
 | `plumbus generate` | Generate API clients, hooks, OpenAPI specs, entity types, type registry |
 | `plumbus capability new` | Scaffold a new capability |
@@ -176,8 +177,10 @@ Files generated:
 | `copilot` | `.github/copilot-instructions.md` | GitHub Copilot instructions |
 | `cursor` | `.cursor/rules/plumbus.mdc`, `.cursor/rules/plumbus-capabilities.mdc` | Cursor rules files |
 | `agents-md` | `AGENTS.md` | Generic agent instruction file |
-| `claude` | `CLAUDE.md` | Claude Code instruction file (same body as `AGENTS.md`) |
+| `claude` | `AGENTS.md`, `CLAUDE.md` | Shared instructions plus a managed Claude import |
 | (all formats) | `.plumbus/briefs/project.md` | Project brief for `plumbus agent` |
+
+Wiring v21 keeps shared root instructions in `AGENTS.md`; `CLAUDE.md` contains `@AGENTS.md`. Claude-only setup creates both files, including in monorepos. `--inline` embeds core recipes in the canonical file. Patching migrates old generated clones and preserves notes outside each managed block. If Claude needs an existing custom `AGENTS.md` without a managed block, a new block is appended without removing the existing text. Existing unmanaged Claude imports remain intact. Symlinks and reverse/self imports are preserved for explicit repair. See [agent setup](../agents/agent-setup.md#claude-code-claudemd).
 
 Generated files include:
 
@@ -187,9 +190,9 @@ Generated files include:
 
 Behavior by mode:
 
-- `plumbus init` creates missing wiring files only and leaves existing files alone
-- `plumbus init --patch` updates only Plumbus-managed sections and preserves surrounding custom notes
-- `plumbus init --force` replaces existing generated wiring files outright
+- `plumbus init` creates missing wiring files and preserves existing files; Claude setup can append a missing managed block to an existing custom `AGENTS.md` without removing its text
+- `plumbus init --patch` refreshes Plumbus-managed sections, creates missing targets, and preserves surrounding custom notes; Claude setup can append a missing canonical block
+- `plumbus init --force` replaces existing regular wiring files; symlinks and reverse-import pairs are preserved for explicit repair
 - `plumbus init --dry-run` previews the changes without writing files
 
 Existing project briefs are preserved by `plumbus init`; use `plumbus agent sync` to refresh them.
@@ -229,7 +232,7 @@ plumbus start [options]
 
 Behavior:
 
-- Loads `plumbus.config.ts` with `environment: "production"` and runs `validateConfig` (fails if required env vars are missing).
+- Loads `config/app.config.ts` with `environment: "production"` and runs `validateConfig` (fails if required env vars are missing).
 - Discovers resources from `app/`, populates registries, connects to the database.
 - Loads server extensions from `app/server.ts` if present (`onRoutesRegistered`, `resolveAiOverrides`, `onCapabilityError`, `onProcessError`, `onAICostRecorded`, `onFlowError`, `enableStrictStructuredOutputs`, and from core 0.7.8 `authenticationRuntime`).
 - Default runtime role is `all` (API + workers colocated). Starts a worker pool when background work is detected (events, flows with triggers/schedules, eventHandlers, jobs).
@@ -333,6 +336,7 @@ Flow scaffolding and dead-letter operations.
 ```bash
 plumbus flow new <name> [options]
 plumbus flow schedule list [options]
+plumbus flow schedule sync [--apply --expected-revision <revision>]
 plumbus flow dead-letter list [options]
 plumbus flow dead-letter retry <executionId>
 ```
@@ -345,7 +349,11 @@ List scheduled flows, merging code-defined `schedule.cron` values with runtime r
 |--------|------|---------|-------------|
 | `--json` | `boolean` | `false` | Output JSON (`{ "schedules": [...] }`) |
 
-Human output includes `synced=false` for flows registered in code but not yet synced to the database (worker has not started). Synced rows show `next` and `last` ISO timestamps when present.
+Human output includes `synced=false` when a registered flow has no persisted schedule row. Startup seeds only the initial schedule set; later additions need explicit sync. `synced=true` means a row exists, not that the definition matches. JSON includes revision/removal/timezone and cron drift metadata when available; persisted rows show `next` and `last` timestamps when present.
+
+#### `plumbus flow schedule sync`
+
+Preview additions, definition changes, removals, and the current revision using the complete intended flow registry. Apply the reviewed result with `--apply --expected-revision <revision>`; a changed revision rejects a stale plan. Use one deployment owner. Reconciliation preserves operator-disabled schedules, tombstones removed definitions, and records superseded overdue ticks. Review legacy database overrides before adoption. See the [upgrade guide](../upgrading-stabilization.md#schedules).
 
 #### `plumbus flow dead-letter list`
 
@@ -356,7 +364,7 @@ Human output includes `synced=false` for flows registered in code but not yet sy
 
 #### `plumbus flow dead-letter retry <executionId>`
 
-Re-enqueue the next flow step for a failed execution after an operator fix.
+Create and return a new replay execution at the failed step after an operator fix. The source stays terminal. Replay validates the original caller snapshot and current definition; repeated requests reuse the recorded replay ID. Effects must remain idempotent.
 
 ---
 
@@ -373,7 +381,7 @@ plumbus doctor [options]
 | `--json` | `boolean` | `false` | Output in JSON format |
 
 Checks performed:
-- Node.js version (≥ 20)
+- Node.js version (22.12+ on 22.x, 24.x, or 26+)
 - `@plumbus/core` installed
 - `@plumbus/ui` version and bundled dependency versions (next, react)
 - `package.json` exists and valid
@@ -764,7 +772,7 @@ plumbus migrate rollback [options]   # Rollback last migration
 
 **Framework-managed tables:**
 
-Plumbus manages 10 internal tables: `audit_records`, `event_outbox`, `event_idempotency`, `event_dead_letter`, `flow_executions`, `flow_dead_letter`, `flow_schedules`, `job_executions`, `documents`, `document_chunks`. **Do not create these tables manually** — they are included in generated migrations automatically.
+Plumbus manages 11 internal tables: `audit_records`, `event_outbox`, `event_idempotency`, `event_dead_letter`, `flow_executions`, `flow_dead_letter`, `flow_schedules`, `flow_schedule_ticks`, `job_executions`, `documents`, `document_chunks`. **Do not create these tables manually** — they are included in generated migrations automatically.
 
 **Schema drift detection:**
 
@@ -1034,3 +1042,12 @@ plumbus run setup-admin -- --email admin@company.com
 ## Generated-file safety
 
 Project/resource scaffold names and provider/compliance identifiers reject executable syntax and path separators before generation. Translation export locale/namespace names and MCP skill names must be single safe path segments. Shared scaffold writers contain generated relative paths within their output root, reject traversal and existing symlinks (including dangling links), and create protected scaffold files exclusively to avoid overwriting a file created after an existence check. All shared CLI writes refuse symlink targets. Run code generation in a project tree controlled by the operator; concurrent hostile replacement of parent directories is outside the portable Node filesystem contract.
+
+
+## Core 0.8 operational changes
+
+- `plumbus flow schedule sync`: preview changes from the complete deployment manifest; apply with `--apply --expected-revision <revision>`. Preserve operator-disabled schedules and review legacy overrides.
+- `plumbus flow dead-letter retry <executionId>`: return a new replay execution ID at the failed step; the source remains terminal.
+- `plumbus init --patch --agent all`: refresh wiring v21. `--inline` embeds core instruction files.
+
+See [the cutover guide](../upgrading-stabilization.md) before activating new workers or reconciling schedules.

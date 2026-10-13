@@ -1,10 +1,18 @@
+import {
+  replayDeadLetterFlow,
+  FlowRegistry,
+  createFlowScheduler,
+  createFlowEngine,
+} from '../../flows/index.js';
+import { discoverRuntimeResources, buildStepDeps } from '../../runtime/bootstrap.js';
+import { CapabilityRegistry } from '../../execution/index.js';
 // ── plumbus flow new ──
 // Scaffold a new flow
 
 import type { Command } from 'commander';
 import * as path from 'node:path';
 import { desc } from 'drizzle-orm';
-import { loadConfig } from '../../config/loader.js';
+import { loadAppConfig } from '../../config/index.js';
 import { closeDatabaseConnection, resolveDatabaseConnection } from '../../data/connection.js';
 import { flowDeadLetterTable } from '../../flows/schema.js';
 import { enqueueFlowStep } from '../../flows/flow-queue.js';
@@ -25,7 +33,7 @@ export function registerFlowCommand(program: Command): void {
     .option('--json', 'Output JSON')
     .action(async (opts: { limit?: string; json?: boolean }) => {
       const limit = parseInt(opts.limit ?? '20', 10);
-      const config = loadConfig();
+      const config = await loadAppConfig();
       const connection = await resolveDatabaseConnection(config.database, {});
       try {
         const rows = await connection.db
@@ -71,17 +79,53 @@ export function registerFlowCommand(program: Command): void {
       }
     });
 
+  schedule
+    .command('sync')
+    .description('Preview or apply the complete deployed schedule manifest')
+    .option('--apply', 'Apply the previewed changes')
+    .option('--expected-revision <revision>', 'Revision from the preview; required with --apply')
+    .action(async (options: { apply?: boolean; expectedRevision?: string }) => {
+      const config = await loadAppConfig();
+      const connection = await resolveDatabaseConnection(config.database, {});
+      try {
+        const resources = await discoverRuntimeResources();
+        const registry = new FlowRegistry();
+        for (const flow of resources.flows) registry.register(flow);
+        const capabilities = new CapabilityRegistry();
+        capabilities.registerAll(resources.capabilities);
+        const engine = createFlowEngine({
+          db: connection.db,
+          registry,
+          stepDeps: buildStepDeps(capabilities),
+        });
+        const scheduler = createFlowScheduler({ db: connection.db, registry, engine });
+        console.log(JSON.stringify(await scheduler.reconcileSchedules(options), null, 2));
+      } finally {
+        await closeDatabaseConnection(connection);
+      }
+    });
+
   dlq
     .command('retry <executionId>')
-    .description('Re-enqueue a flow step after operator fix')
+    .description('Replay a failed flow step as a new execution')
     .action(async (executionId: string) => {
-      const config = loadConfig();
+      const config = await loadAppConfig();
+      const connection = await resolveDatabaseConnection(config.database, {});
       const queues = await resolveRuntimeQueues(config);
       try {
-        await enqueueFlowStep(queues.flows, executionId);
-        success(`Re-enqueued flow step for execution ${executionId}`);
+        const registry = new FlowRegistry();
+        const resources = await discoverRuntimeResources();
+        for (const flow of resources.flows) registry.register(flow);
+        const replayId = await replayDeadLetterFlow(connection.db, registry, executionId);
+        try {
+          await enqueueFlowStep(queues.flows, replayId);
+        } catch {
+          info('Replay persisted; worker database reconciliation will recover its wake');
+        }
+        success(`Replay execution ${replayId} (source ${executionId})`);
       } finally {
         await queues.close();
+        await closeDatabaseConnection(connection);
       }
     });
 

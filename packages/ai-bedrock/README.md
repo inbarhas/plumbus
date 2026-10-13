@@ -1,10 +1,12 @@
 # @plumbus/ai-bedrock
 
+Release **0.3.0** belongs to the core 0.8 stabilization family. See the [changelog](./CHANGELOG.md) and [upgrade guide](../../docs/upgrading-stabilization.md) before updating an existing app.
+
 > **Amazon Bedrock for [Plumbus](https://github.com/plumbus-framework/plumbus) AI.** Optional AWS SDK adapter for Converse chat, ConverseStream, Titan embeddings, and **package-owned USD cost** from the AWS Price List (or a mounted pricing file).
 
 [![npm](https://img.shields.io/npm/v/@plumbus/ai-bedrock.svg)](https://www.npmjs.com/package/@plumbus/ai-bedrock)
 [![license](https://img.shields.io/npm/l/@plumbus/ai-bedrock.svg)](https://github.com/plumbus-framework/plumbus/blob/main/LICENSE)
-[![peer: @plumbus/core 0.7.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.7.x-blue)](https://www.npmjs.com/package/@plumbus/core)
+[![peer: @plumbus/core 0.8.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.8.x-blue)](https://www.npmjs.com/package/@plumbus/core)
 
 ## What is this?
 
@@ -46,7 +48,7 @@ An opt-in peer keeps core lean while giving AWS shops a first-class `provider: '
 
 ## Status
 
-Optional peer of `@plumbus/core` (version-locked **`0.2.x`**; required peer `@plumbus/core` **`0.7.x`**). **Runtime floor:** `@plumbus/core` **≥ 0.7.0**; prompt caching through `ctx.ai` needs **≥ 0.7.9**. Install alone is not enough until the adapter is registered (env discovery or `createBedrockAdapter`).
+Optional peer of `@plumbus/core` (version-locked **`0.3.x`**; required peer `@plumbus/core` **`0.8.x`**). **Runtime floor:** `@plumbus/core` **≥ 0.7.0**; prompt caching through `ctx.ai` needs **≥ 0.7.9**. Install alone is not enough until the adapter is registered (env discovery or `createBedrockAdapter`).
 
 ## Install
 
@@ -54,7 +56,7 @@ Optional peer of `@plumbus/core` (version-locked **`0.2.x`**; required peer `@pl
 pnpm add @plumbus/ai-bedrock
 ```
 
-Peer (copy literally): `@plumbus/core` `0.7.x`. See `packages/plumbus-core/instructions/peer-dependencies.md`.
+Peer (copy literally): `@plumbus/core` `0.8.x`. See `packages/plumbus-core/instructions/peer-dependencies.md`.
 
 If agent wiring predates Bedrock instructions, refresh:
 
@@ -134,7 +136,7 @@ Full curl, normalize script, ConfigMap sketch: **[instructions/pricing.md](./ins
 - **Missing pricing file** — file mode throws on first call; auto-download failure warns, leaves cost unknown, and backs off 5 minutes before retrying.
 - **Unmapped / unkeyed models** — inference works; **no `cost` field** is set until the pricing file has an explicit family-key row (auto-download is best-effort, not a complete AWS catalog). Core then falls back to its own catalog rather than recording the call as free.
 - **IAM** — Converse itself requires `bedrock:InvokeModel`; do not scope that action to embedding models only.
-- **Wiring** — after install, `plumbus init --patch` (wiring v13+, any core 0.7.x) so agents see `instructions/`.
+- **Wiring** — after install, `plumbus init --patch` (wiring v13+, any core 0.8.x) so agents see `instructions/`.
 
 ## Documentation / Agent recipes
 

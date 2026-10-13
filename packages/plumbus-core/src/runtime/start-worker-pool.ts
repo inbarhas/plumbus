@@ -144,6 +144,7 @@ export async function startWorkerPool(options: StartWorkerPoolOptions): Promise<
       });
     },
     eventRegistry: events,
+    onEventDeadLetter: extensions?.onEventDeadLetter,
     onFlowError: extensions?.onFlowError,
     onCapabilityError: extensions?.onCapabilityError,
     logger,

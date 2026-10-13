@@ -1,10 +1,12 @@
 # @plumbus/mcp
 
+Release **0.7.0** belongs to the core 0.8 stabilization family. See the [changelog](./CHANGELOG.md) and [upgrade guide](../../docs/upgrading-stabilization.md) before updating an existing app.
+
 > **Serve your existing [Plumbus](https://github.com/plumbus-framework/plumbus) capabilities to AI agents over MCP.** Mark a capability with `exposeAs: ['mcp']`, configure agent tokens, and it becomes a callable tool for Claude Desktop, Cursor, custom agent runners — with the **same validation, access policies, and audit pipeline** as your HTTP routes.
 
 [![npm](https://img.shields.io/npm/v/@plumbus/mcp.svg)](https://www.npmjs.com/package/@plumbus/mcp)
 [![license](https://img.shields.io/npm/l/@plumbus/mcp.svg)](./LICENSE)
-[![peer: @plumbus/core 0.5.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.5.x-blue)](https://www.npmjs.com/package/@plumbus/core)
+[![peer: @plumbus/core 0.8.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.8.x-blue)](https://www.npmjs.com/package/@plumbus/core)
 [![MCP spec: tools + tasks](https://img.shields.io/badge/MCP-tools%20%2B%20tasks-7c5cff)](https://modelcontextprotocol.io)
 
 ## What is this?
@@ -42,7 +44,7 @@ Plumbus already has all of that for HTTP. This package routes it through MCP. **
 
 ## Status
 
-Optional peer of `@plumbus/core` (version-locked `0.6.x`). Implements the MCP transport layer, auth model, tasks, and the per-tool-call observability hook. OAuth, resources, prompts, sampling, elicitation, completions, roots, and logging are out of scope — see [MCP spec coverage](#mcp-spec-coverage).
+MCP 0.7.x is an optional peer of core 0.8.x and requires the core peer `0.8.x`. Implements the MCP transport layer, auth model, tasks, and the per-tool-call observability hook. OAuth, resources, prompts, sampling, elicitation, completions, roots, and logging are out of scope — see [MCP spec coverage](#mcp-spec-coverage).
 
 ## Install
 

@@ -1,10 +1,12 @@
 # Framework boundary
 
+Current release: **0.3.0**, in the core **0.8.x** stabilization family. Follow `node_modules/@plumbus/core/instructions/stabilization.md` before upgrading, then run `plumbus init --patch --agent all` for wiring **v21**. Historical feature introduction versions below do not replace the current peer requirements.
+
 Shared decision contracts, runtime validation, structured errors, and HTTP transport.
 
 ## Install and ownership
 
-Install `@plumbus/ai-decision` explicitly. Its core peer is exactly `"0.7.x"`.
+Install `@plumbus/ai-decision` explicitly. Its core peer is exactly `"0.8.x"`.
 Consumers reuse Zod/testing utilities from core; do not install them separately.
 Use this package for bounded typed decisions. Use core generation and embeddings
 for text responses and vector inference.

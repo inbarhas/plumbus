@@ -1,3 +1,12 @@
+import { randomUUID } from 'node:crypto';
+import {
+  resolveRetryPolicy,
+  retryDelay,
+  isPermanentFailure,
+  isDeferredDelivery,
+  type RetryPolicy,
+} from '../config/index.js';
+import { DataValidationError } from '../errors/index.js';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { PlumbusMetrics } from '../observability/metrics.js';
 import type { AuditService } from '../types/audit.js';
@@ -11,7 +20,22 @@ import { deadLetterTable } from './outbox.js';
 import { recordPipelineAudit } from './pipeline-audit.js';
 import type { EventQueue } from './queue.js';
 
-export interface WorkerConfig {
+export interface EventDeadLetterInfo {
+  deadLetterId: string;
+  eventId: string;
+  eventType: string;
+  consumerId?: string;
+  attempts: number;
+  reason: 'exhausted' | 'permanent' | 'unrouted';
+  tenantId?: string;
+}
+export interface EventDeliveryOptions {
+  retry?: RetryPolicy;
+  unrouted?: 'deadLetter' | 'acknowledge';
+  ignoredEventTypes?: string[];
+}
+export interface WorkerConfig extends EventDeliveryOptions {
+  onEventDeadLetter?: (info: EventDeadLetterInfo) => void | Promise<void>;
   db: PostgresJsDatabase;
   queue: EventQueue;
   consumers: ConsumerRegistry;
@@ -51,11 +75,62 @@ export function createEventWorker(config: WorkerConfig) {
 
   let unsubscribe: (() => void) | null = null;
 
-  /** Compute exponential backoff with jitter */
-  function computeRetryDelay(attempt: number): number {
-    const base = Math.min(retryBackoffBaseMs * 2 ** attempt, retryBackoffMaxMs);
-    // Add jitter: random value between 0 and base
-    return base + Math.floor(Math.random() * base * 0.5);
+  if (config.retry?.maxAttempts !== undefined && config.defaultMaxRetries !== undefined)
+    throw new DataValidationError('Use retry.maxAttempts or defaultMaxRetries, not both');
+  const defaults = resolveRetryPolicy(config.retry, {
+    maxAttempts: defaultMaxRetries,
+    backoff: 'exponential',
+    baseDelayMs: retryBackoffBaseMs,
+    maxDelayMs: retryBackoffMaxMs,
+  });
+
+  async function deadLetter(
+    envelope: EventEnvelope,
+    consumerId: string | undefined,
+    attempts: number,
+    reason: EventDeadLetterInfo['reason'],
+    lastError: string,
+  ): Promise<void> {
+    const deadLetterId = randomUUID();
+    await db.insert(deadLetterTable).values({
+      id: deadLetterId,
+      eventId: envelope.id,
+      eventType: envelope.eventType,
+      payload: envelope.payload as any,
+      consumerId,
+      lastError,
+      retryCount: String(attempts),
+      metadata: {
+        correlationId: envelope.correlationId,
+        causationId: envelope.causationId,
+        actor: envelope.actor,
+        tenantId: envelope.tenantId,
+        reason,
+      },
+    });
+    const info: EventDeadLetterInfo = {
+      deadLetterId,
+      eventId: envelope.id,
+      eventType: envelope.eventType,
+      consumerId,
+      attempts,
+      reason,
+      tenantId: envelope.tenantId,
+    };
+    metrics?.eventFailed.inc({ consumer: consumerId ?? 'unrouted' });
+    await recordPipelineAudit(audit, logger, 'event.consumer.dead_lettered', {
+      ...info,
+      outcome: 'failure',
+    });
+    (logger ?? console).error('Event delivery dead-lettered', { ...info });
+    try {
+      await config.onEventDeadLetter?.(info);
+    } catch {
+      (logger ?? console).error('Event dead-letter notification failed', {
+        deadLetterId,
+        eventId: envelope.id,
+      });
+    }
   }
 
   function sleep(ms: number): Promise<void> {
@@ -66,8 +141,30 @@ export function createEventWorker(config: WorkerConfig) {
     const matched = consumers.getConsumers(envelope.eventType, envelope.version);
     const deliveryStarted = Date.now();
 
+    if (matched.length === 0) {
+      metrics?.eventUnrouted?.inc();
+      const ignored = config.ignoredEventTypes?.includes(envelope.eventType) === true;
+      await recordPipelineAudit(audit, logger, 'event.consumer.unrouted', {
+        eventId: envelope.id,
+        eventType: envelope.eventType,
+        ignored,
+        outcome: 'failure',
+      });
+      (logger ?? console).warn('Event has no matching local consumer', {
+        eventId: envelope.id,
+        eventType: envelope.eventType,
+        ignored,
+      });
+      if (!ignored && config.unrouted !== 'acknowledge')
+        await deadLetter(envelope, undefined, 0, 'unrouted', 'No matching local consumer');
+      return;
+    }
     for (const consumer of matched) {
-      const maxRetries = consumer.maxRetries ?? defaultMaxRetries;
+      const policy = resolveRetryPolicy(consumer.retry, {
+        ...defaults,
+        maxAttempts: consumer.maxRetries ?? defaults.maxAttempts,
+      });
+      const maxRetries = policy.maxAttempts;
 
       // Idempotency guard
       const alreadyProcessed = await idempotency.isProcessed(envelope.id, consumer.id);
@@ -76,6 +173,7 @@ export function createEventWorker(config: WorkerConfig) {
       let lastError: string | undefined;
       let attempt = 0;
       let succeeded = false;
+      let permanent = false;
 
       while (attempt < maxRetries && !succeeded) {
         attempt++;
@@ -91,10 +189,11 @@ export function createEventWorker(config: WorkerConfig) {
           await consumer.handler(envelope);
           succeeded = true;
         } catch (err) {
+          if (isDeferredDelivery(err)) throw err;
           lastError = err instanceof Error ? err.message : String(err);
-          if (attempt < maxRetries) {
-            await sleep(computeRetryDelay(attempt - 1));
-          }
+          permanent = isPermanentFailure(err);
+          if (permanent) break;
+          if (attempt < maxRetries) await sleep(retryDelay(policy, attempt));
         }
       }
 
@@ -113,34 +212,16 @@ export function createEventWorker(config: WorkerConfig) {
           outcome: 'success',
         });
       } else {
-        metrics?.eventFailed.inc({ consumer: consumer.id });
+        await deadLetter(
+          envelope,
+          consumer.id,
+          attempt,
+          permanent ? 'permanent' : 'exhausted',
+          lastError ?? 'Unknown error',
+        );
         metrics?.eventDeliveryDuration.observe(Date.now() - deliveryStarted, {
           consumer: consumer.id,
           outcome: 'failed',
-        });
-        await recordPipelineAudit(audit, logger, 'event.consumer.dead_lettered', {
-          eventId: envelope.id,
-          eventType: envelope.eventType,
-          consumerId: consumer.id,
-          tenantId: envelope.tenantId,
-          lastError,
-          attempts: attempt,
-          outcome: 'failure',
-        });
-        // Dead-letter
-        await db.insert(deadLetterTable).values({
-          eventId: envelope.id,
-          eventType: envelope.eventType,
-          payload: envelope.payload as any,
-          consumerId: consumer.id,
-          lastError: lastError ?? 'Unknown error',
-          retryCount: String(attempt),
-          metadata: {
-            correlationId: envelope.correlationId,
-            causationId: envelope.causationId,
-            actor: envelope.actor,
-            tenantId: envelope.tenantId,
-          },
         });
 
         if (consumer.id.startsWith('job:')) {

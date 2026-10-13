@@ -52,4 +52,6 @@ export type { SchedulerConfig } from './scheduler.js';
 export { createFlowService } from './flow-service.js';
 
 // ── Dead Letter ──
-export { deadLetterFlow, sweepFailedFlows } from './dead-letter.js';
+export { deadLetterFlow, sweepFailedFlows, replayDeadLetterFlow } from './dead-letter.js';
+
+export { validateSchedule } from './cron.js';

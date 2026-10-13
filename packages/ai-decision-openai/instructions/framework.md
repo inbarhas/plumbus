@@ -1,22 +1,23 @@
 # Framework boundary
 
+Current release: **0.3.0**, in the core **0.8.x** stabilization family. Follow `node_modules/@plumbus/core/instructions/stabilization.md` before upgrading, then run `plumbus init --patch --agent all` for wiring **v21**. Historical feature introduction versions below do not replace the current peer requirements.
+
 OpenAI Decisions API provider for typed choices, scores, and probabilities. OpenAI's
 Decisions API is in public beta; this adapter follows OpenAI's documentation as of
 2026-10-08 and may need a patch release if the API changes at general availability.
 
 ## Install and ownership
 
-Install `@plumbus/ai-decision-openai` explicitly. Its core peer is exactly `"0.7.x"`.
+Install `@plumbus/ai-decision-openai` explicitly. Its core peer is exactly `"0.8.x"`.
 Consumers reuse Zod/testing utilities from core; do not install them separately, and
 do not install the `openai` SDK for this adapter. Use this package for bounded typed
 decisions. Use core generation and embeddings (the `openai` text provider) for text
 responses and vector inference.
 
-Core checks every `ctx.ai` result again with its own copy of `@plumbus/ai-decision`,
-and only 0.2.3+ allows for OpenAI's rounding. Core 0.7.9 depends on `~0.2.3`. On core
-0.7.3–0.7.8, run `pnpm dedupe` after installing and check that
-`pnpm why @plumbus/ai-decision` lists a single 0.2.3+ copy; otherwise core rejects
-OpenAI's rounded answers as `invalid_response` after the call is billed.
+Core checks every `ctx.ai` result again with its own copy of `@plumbus/ai-decision`.
+Core 0.8 and this provider both depend on `~0.3.0`, including the rounding support
+introduced in 0.2.3. Install matching release families; do not pair this provider
+line with core 0.7.
 
 Public exports: `createOpenAIDecisionAdapter` — construct an explicitly configured adapter;
 `OpenAIDecisionInputRates` — bundled input USD per million tokens; `DecisionProviderError` —
