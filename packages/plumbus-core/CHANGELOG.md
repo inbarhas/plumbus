@@ -2,6 +2,8 @@
 
 ## 0.8.0 — Stabilization compatibility family
 
+- Install Redis and PostgreSQL 16 explicitly in PR-test and publish CI before running real-server integration tests; document the matching local prerequisites. Fixes `spawn redis-server ENOENT` on runners without Redis preinstalled.
+
 - Upgrade the framework test toolchain to **Vitest 5.0.4** and require Node 22.12+ on the 22.x line, Node 24.x, or Node 26+. Core owns the required Vite dependency (`^7.3.7`); update worker settings and existing E2E configs as described in the [Vitest migration guide](../../docs/upgrading-vitest.md). `plumbus doctor` checks the new Node floor. Generated E2E configs explicitly exclude config files from test discovery; a real Vitest discovery regression covers this.
 
 **Agent wiring v21:** make `AGENTS.md` canonical and generate a managed `@AGENTS.md` import in `CLAUDE.md`. Claude-only setup creates both files; inline recipes live in `AGENTS.md`. Patch v20 clones with `plumbus init --patch --agent all`, preserving app-owned notes. Doctor checks imported targets and cycles; generators preserve symlinks rather than writing through them.

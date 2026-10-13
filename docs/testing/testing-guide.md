@@ -562,6 +562,18 @@ Custom execution-context fixtures must inject an audit service when exercising a
 
 Framework stabilization integration tests start disposable PostgreSQL and Redis instances, using separate connections for race tests. Install `redis-server` and PostgreSQL binaries; `PLUMBUS_TEST_POSTGRES_BIN` overrides `/usr/lib/postgresql/16/bin`. Fixtures use a private temporary Unix socket for PostgreSQL and stop processes they start. Tests exercise real SQL guards, tick transactions, queue scripts, replay, and job publication recovery.
 
+The PR test and publish workflows install `redis-server` and `postgresql-16` explicitly before running the suite. For local Ubuntu development, install the same prerequisites once:
+
+```bash
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends redis-server postgresql-16
+redis-server --version
+/usr/lib/postgresql/16/bin/initdb --version
+/usr/lib/postgresql/16/bin/pg_ctl --version
+```
+
+`spawn redis-server ENOENT` means the Redis executable is missing from `PATH`; installing the npm `redis` client does not install that server executable. No shared database service needs to be started manually: fixtures start isolated processes. These integration tests remain required and are not silently skipped when a prerequisite is missing.
+
 The standalone voice/ledger declaration build uses strict TypeScript, matching the repository. This preserves discriminated-union narrowing when public SDK barrels pull in additional modules.
 
 The Turbo dry-run integration test allows 20 seconds around its independently bounded 15-second child process. Dependency-graph scans under concurrent test load can exceed Vitest's default five-second limit; its assertions and package/worker concurrency limits remain unchanged.
