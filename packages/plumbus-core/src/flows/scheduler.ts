@@ -1,332 +1,308 @@
-import { createRequire } from 'node:module';
-import { eq, lte } from 'drizzle-orm';
+import { databaseTime } from './database-clock.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { and, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { DataValidationError } from '../errors/index.js';
 import type { LoggerService } from '../types/context.js';
-import type { AuthContext } from '../types/security.js';
+import type { FlowDefinition } from '../types/flow.js';
 import type { createFlowEngine } from './engine.js';
 import type { FlowRegistry } from './registry.js';
-import { flowSchedulesTable } from './schema.js';
+import { flowExecutionsTable, flowSchedulesTable, flowScheduleTicksTable } from './schema.js';
+import { createFlowExecutionRecord } from './execution-record.js';
+import { computeNextRun, validateSchedule } from './cron.js';
+export { computeNextRun } from './cron.js';
 
 export interface SchedulerConfig {
   db: PostgresJsDatabase;
   registry: FlowRegistry;
   engine: ReturnType<typeof createFlowEngine>;
-  /** Optional logger for error reporting */
   logger?: LoggerService;
-  /** Poll interval in milliseconds (default: 60000 = 1 min) */
   pollIntervalMs?: number;
 }
-
-/**
- * Simple cron-like scheduler that polls for flows whose nextRunAt has passed.
- * Uses the flow_schedules table to track run state.
- *
- * Note: This is a simplified implementation. For production use, consider
- * a proper cron parser library (e.g., cron-parser) for nextRunAt computation.
- */
-export function createFlowScheduler(config: SchedulerConfig) {
-  const { db, registry, engine, logger, pollIntervalMs = 60_000 } = config;
-  let timer: ReturnType<typeof setInterval> | null = null;
-  let running = false;
-
-  const systemAuth: AuthContext = {
-    userId: 'system-scheduler',
-    roles: ['system'],
-    scopes: [],
-    provider: 'scheduler',
+function scheduleDefinition(flow: FlowDefinition) {
+  const schedule = flow.schedule;
+  if (!schedule) throw new DataValidationError('Flow has no schedule', { flowName: flow.name });
+  validateSchedule(schedule, flow.name);
+  return {
+    cron: schedule.cron,
+    timezone: schedule.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    overlap: schedule.overlap ?? 'allow',
+    firstRun: schedule.firstRun ?? 'immediate',
   };
+}
+function hash(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+function definitionHash(flow: FlowDefinition) {
+  return hash({ name: flow.name, schedule: scheduleDefinition(flow), steps: flow.steps });
+}
 
-  /**
-   * Sync registered flows with schedules into the database.
-   * Call once at startup to ensure all scheduled flows have a row.
-   */
+export function createFlowScheduler(config: SchedulerConfig) {
+  const { db, registry, engine, logger = console, pollIntervalMs = 60000 } = config;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let active: Promise<number> | undefined;
+  let lastWarning = -Infinity;
+  function warn(flowName: string, reason: string) {
+    if (Date.now() - lastWarning < 60000) return;
+    lastWarning = Date.now();
+    logger.warn('Schedule requires reconciliation', { flowName, reason });
+  }
   async function syncSchedules(): Promise<number> {
-    const scheduled = registry.getScheduled();
-    let synced = 0;
-
-    for (const flow of scheduled) {
-      if (!flow.schedule?.cron) continue;
-
-      const existing = await db
+    return db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('plumbus:schedule-reconciliation'))`,
+      );
+      const existing = await tx.select().from(flowSchedulesTable);
+      const scheduled = registry.getScheduled();
+      const now = await databaseTime(tx);
+      let count = 0;
+      for (const flow of scheduled) {
+        const definition = scheduleDefinition(flow);
+        if (existing.length > 0) {
+          if (
+            !existing.some(
+              (row) =>
+                row.flowName === flow.name &&
+                row.definitionHash === definitionHash(flow) &&
+                !row.removed,
+            )
+          )
+            warn(flow.name, 'deployment_sync_required');
+          continue;
+        }
+        const inserted = await tx
+          .insert(flowSchedulesTable)
+          .values({
+            flowName: flow.name,
+            ...definition,
+            definitionHash: definitionHash(flow),
+            revision: 1,
+            nextRunAt:
+              definition.firstRun === 'immediate'
+                ? now
+                : computeNextRun(definition.cron, now, definition.timezone),
+          })
+          .onConflictDoNothing({ target: flowSchedulesTable.flowName })
+          .returning({ id: flowSchedulesTable.id });
+        count += inserted.length;
+      }
+      return count;
+    });
+  }
+  /** One deployment applies a complete manifest. Stale applications cannot overwrite it. */
+  async function reconcileSchedules(options: { apply?: boolean; expectedRevision?: string } = {}) {
+    return db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('plumbus:schedule-reconciliation'))`,
+      );
+      const stored = await tx.select().from(flowSchedulesTable).for('update');
+      const revision = hash(
+        stored
+          .sort((a, b) => a.flowName.localeCompare(b.flowName))
+          .map((row) => [
+            row.id,
+            row.revision,
+            row.definitionHash,
+            row.cron,
+            row.enabled,
+            row.removed,
+          ]),
+      );
+      if (options.apply && options.expectedRevision !== revision)
+        throw new DataValidationError('Schedule revision changed; preview reconciliation again', {
+          revision,
+        });
+      const desired = registry.getScheduled();
+      const changes: { flowName: string; action: string; previous?: unknown; next?: unknown }[] =
+        [];
+      const now = await databaseTime(tx);
+      for (const flow of desired) {
+        const definition = scheduleDefinition(flow);
+        const fingerprint = definitionHash(flow);
+        const row = stored.find((item) => item.flowName === flow.name);
+        if (row && row.definitionHash === fingerprint && !row.removed) continue;
+        changes.push({
+          flowName: flow.name,
+          action: row ? 'update' : 'create',
+          previous: row
+            ? {
+                cron: row.cron,
+                timezone: row.timezone,
+                overlap: row.overlap,
+                enabled: row.enabled,
+                removed: row.removed,
+                nextRunAt: row.nextRunAt,
+              }
+            : undefined,
+          next: definition,
+        });
+        if (!options.apply) continue;
+        if (!row) {
+          await tx.insert(flowSchedulesTable).values({
+            flowName: flow.name,
+            ...definition,
+            definitionHash: fingerprint,
+            revision: 1,
+            nextRunAt:
+              definition.firstRun === 'immediate'
+                ? now
+                : computeNextRun(definition.cron, now, definition.timezone),
+          });
+        } else {
+          // The explicit deployment change supersedes any unmaterialized overdue tick.
+          if (row.nextRunAt && row.nextRunAt <= now)
+            await tx
+              .insert(flowScheduleTicksTable)
+              .values({
+                scheduleId: row.id,
+                scheduledFor: row.nextRunAt,
+                revision: row.revision,
+                outcome: 'skipped_configuration_change',
+              })
+              .onConflictDoNothing();
+          await tx
+            .update(flowSchedulesTable)
+            .set({
+              ...definition,
+              definitionHash: fingerprint,
+              revision: row.revision + 1,
+              removed: false,
+              adoptedAt: row.definitionHash ? row.adoptedAt : now,
+              nextRunAt: computeNextRun(definition.cron, now, definition.timezone),
+            })
+            .where(eq(flowSchedulesTable.id, row.id));
+        }
+      }
+      for (const row of stored) {
+        if (row.removed || desired.some((flow) => flow.name === row.flowName)) continue;
+        changes.push({
+          flowName: row.flowName,
+          action: 'remove',
+          previous: { cron: row.cron, enabled: row.enabled, nextRunAt: row.nextRunAt },
+        });
+        if (options.apply)
+          await tx
+            .update(flowSchedulesTable)
+            .set({ removed: true, revision: row.revision + 1 })
+            .where(eq(flowSchedulesTable.id, row.id));
+      }
+      return { revision, changes, applied: options.apply === true };
+    });
+  }
+  async function runPoll(): Promise<number> {
+    const wakes = await db.transaction(async (tx) => {
+      const now = await databaseTime(tx);
+      const due = await tx
         .select()
         .from(flowSchedulesTable)
-        .where(eq(flowSchedulesTable.flowName, flow.name))
-        .limit(1);
-
-      if (existing.length === 0) {
-        await db.insert(flowSchedulesTable).values({
-          flowName: flow.name,
-          cron: flow.schedule.cron,
-          nextRunAt: new Date(), // first run immediately
-        });
-        synced++;
-      }
-    }
-
-    return synced;
-  }
-
-  /**
-   * Run a single poll cycle: find due schedules and start flows.
-   */
-  async function poll(): Promise<number> {
-    const now = new Date();
-    const dueSchedules = await db
-      .select()
-      .from(flowSchedulesTable)
-      .where(lte(flowSchedulesTable.nextRunAt, now));
-
-    let triggered = 0;
-    for (const schedule of dueSchedules) {
-      if (!schedule.enabled) continue;
-
-      try {
-        await engine.start(schedule.flowName, {}, systemAuth);
-        // Update last/next run times
-        await db
-          .update(flowSchedulesTable)
-          .set({
-            lastRunAt: now,
-            nextRunAt: computeNextRun(schedule.cron, now),
+        .where(
+          and(
+            eq(flowSchedulesTable.enabled, true),
+            eq(flowSchedulesTable.removed, false),
+            lte(flowSchedulesTable.nextRunAt, now),
+          ),
+        )
+        .limit(50)
+        .for('update', { skipLocked: true });
+      const created: string[] = [];
+      for (const row of due) {
+        const flow = registry.get(row.flowName);
+        if (!flow?.schedule) {
+          warn(row.flowName, 'missing_local_definition');
+          continue;
+        }
+        if (definitionHash(flow) !== row.definitionHash) {
+          warn(row.flowName, 'definition_drift');
+          continue;
+        }
+        if (!row.nextRunAt) continue;
+        const nextRunAt = computeNextRun(row.cron, now, row.timezone ?? undefined);
+        const running =
+          row.overlap === 'skip'
+            ? await tx
+                .select({ id: flowExecutionsTable.id })
+                .from(flowExecutionsTable)
+                .where(
+                  and(
+                    or(
+                      eq(flowExecutionsTable.scheduleId, row.id),
+                      and(
+                        isNull(flowExecutionsTable.scheduleId),
+                        eq(flowExecutionsTable.flowName, row.flowName),
+                        lt(flowExecutionsTable.createdAt, row.adoptedAt),
+                      ),
+                    ),
+                    inArray(flowExecutionsTable.status, ['created', 'running', 'waiting']),
+                  ),
+                )
+                .limit(1)
+            : [];
+        const tickId = randomUUID();
+        const executionId = randomUUID();
+        const tick = await tx
+          .insert(flowScheduleTicksTable)
+          .values({
+            id: tickId,
+            scheduleId: row.id,
+            scheduledFor: row.nextRunAt,
+            revision: row.revision,
+            executionId: running.length ? null : executionId,
+            outcome: running.length ? 'skipped_overlap' : 'started',
           })
-          .where(eq(flowSchedulesTable.id, schedule.id));
-        triggered++;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger?.error(`Scheduler failed to start flow "${schedule.flowName}"`, {
-          flowName: schedule.flowName,
-          scheduleId: schedule.id,
-          error: message,
+          .onConflictDoNothing()
+          .returning({ id: flowScheduleTicksTable.id });
+        if (tick.length && !running.length) {
+          await createFlowExecutionRecord(
+            tx as unknown as PostgresJsDatabase,
+            flow,
+            {},
+            { userId: 'system-scheduler', roles: ['system'], scopes: [], provider: 'scheduler' },
+            { executionId, scheduleId: row.id, scheduleTickId: tickId },
+          );
+          created.push(executionId);
+        }
+        await tx
+          .update(flowSchedulesTable)
+          .set({ lastRunAt: now, nextRunAt })
+          .where(eq(flowSchedulesTable.id, row.id));
+      }
+      return created;
+    });
+    for (const id of wakes) {
+      try {
+        await engine.wake(id);
+      } catch {
+        logger.error('Scheduled execution persisted; wake awaits database reconciliation', {
+          executionId: id,
         });
       }
     }
-
-    return triggered;
+    return wakes.length;
   }
-
-  async function tick(): Promise<void> {
-    try {
-      await poll();
-    } catch (err: unknown) {
-      const details = { error: err instanceof Error ? err.message : String(err) };
-      if (logger) logger.warn('Flow scheduler poll failed; retrying next tick', details);
-      else console.warn('[plumbus] flow scheduler poll failed; retrying next tick', details);
-    }
+  function poll(): Promise<number> {
+    active ??= runPoll().finally(() => {
+      active = undefined;
+    });
+    return active;
   }
-
   return {
     syncSchedules,
+    reconcileSchedules,
     poll,
-
-    start(): void {
-      if (running) return;
-      running = true;
-      timer = setInterval(() => {
-        void tick();
+    start() {
+      timer ??= setInterval(() => {
+        void poll().catch(() =>
+          logger.error('Scheduler poll failed; durable ticks remain recoverable'),
+        );
       }, pollIntervalMs);
     },
-
-    stop(): void {
-      running = false;
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
-      }
+    async stop() {
+      clearInterval(timer);
+      timer = undefined;
+      await active?.catch(() => {});
     },
-
-    get isRunning(): boolean {
-      return running;
+    get isRunning() {
+      return timer !== undefined;
     },
   };
-}
-
-/**
- * Compute the next run time from a cron expression or interval pattern.
- *
- * Supports:
- * - Simple intervals: "every:60m", "every:24h", "every:1d"
- * - Standard 5-field cron: "minute hour day-of-month month day-of-week"
- *
- * Cron fields: minute (0-59), hour (0-23), day-of-month (1-31),
- * month (1-12), day-of-week (0-6, 0=Sunday).
- * Supports wildcards, specific values, ranges (1-5), step values,
- * comma-separated lists, and day/month name abbreviations.
- */
-const localRequire = createRequire(import.meta.url);
-
-function tryCronParserNext(cron: string, from: Date): Date | undefined {
-  try {
-    const cronParser = localRequire('cron-parser') as {
-      parseExpression: (
-        expression: string,
-        options?: { currentDate?: Date },
-      ) => { next: () => { toDate: () => Date } };
-    };
-    return cronParser.parseExpression(cron, { currentDate: from }).next().toDate();
-  } catch {
-    return undefined;
-  }
-}
-
-export function computeNextRun(cron: string, from: Date): Date {
-  const parsed = tryCronParserNext(cron, from);
-  if (parsed) {
-    return parsed;
-  }
-
-  // Parse simple interval patterns like "every:60m", "every:24h", "every:1d"
-  const match = cron.match(/^every:(\d+)([mhd])$/);
-  if (match) {
-    const value = parseInt(match[1] ?? '', 10);
-    const unit = match[2] ?? 'm';
-    const ms =
-      unit === 'm' ? value * 60_000 : unit === 'h' ? value * 3_600_000 : value * 86_400_000;
-    return new Date(from.getTime() + ms);
-  }
-
-  // Standard 5-field cron expression
-  const parts = cron.trim().split(/\s+/);
-  if (parts.length === 5) {
-    const parsed = parseCronExpression(parts as [string, string, string, string, string]);
-    if (parsed) {
-      return findNextCronMatch(parsed, from);
-    }
-  }
-
-  // Default: 1 hour from now for unparsed expressions
-  return new Date(from.getTime() + 3_600_000);
-}
-
-// ── Cron Parser ──
-
-const DAY_NAMES: Record<string, number> = {
-  SUN: 0,
-  MON: 1,
-  TUE: 2,
-  WED: 3,
-  THU: 4,
-  FRI: 5,
-  SAT: 6,
-};
-
-const MONTH_NAMES: Record<string, number> = {
-  JAN: 1,
-  FEB: 2,
-  MAR: 3,
-  APR: 4,
-  MAY: 5,
-  JUN: 6,
-  JUL: 7,
-  AUG: 8,
-  SEP: 9,
-  OCT: 10,
-  NOV: 11,
-  DEC: 12,
-};
-
-interface CronField {
-  values: Set<number>;
-}
-
-interface ParsedCron {
-  minute: CronField;
-  hour: CronField;
-  dayOfMonth: CronField;
-  month: CronField;
-  dayOfWeek: CronField;
-}
-
-function parseCronField(
-  field: string,
-  min: number,
-  max: number,
-  names?: Record<string, number>,
-): CronField | null {
-  const values = new Set<number>();
-
-  for (const part of field.split(',')) {
-    const trimmed = part.trim().toUpperCase();
-
-    // Resolve named constants
-    let resolved = trimmed;
-    if (names) {
-      for (const [name, val] of Object.entries(names)) {
-        resolved = resolved.replace(name, String(val));
-      }
-    }
-
-    // Star with optional step: */N or *
-    const starStep = resolved.match(/^\*\/(\d+)$/);
-    if (starStep) {
-      const step = parseInt(starStep[1] ?? '', 10);
-      if (step <= 0) return null;
-      for (let i = min; i <= max; i += step) values.add(i);
-      continue;
-    }
-    if (resolved === '*') {
-      for (let i = min; i <= max; i++) values.add(i);
-      continue;
-    }
-
-    // Range with optional step: N-M/S or N-M
-    const rangeStep = resolved.match(/^(\d+)-(\d+)(?:\/(\d+))?$/);
-    if (rangeStep) {
-      const start = parseInt(rangeStep[1] ?? '', 10);
-      const end = parseInt(rangeStep[2] ?? '', 10);
-      const step = rangeStep[3] ? parseInt(rangeStep[3], 10) : 1;
-      if (start < min || end > max || step <= 0) return null;
-      for (let i = start; i <= end; i += step) values.add(i);
-      continue;
-    }
-
-    // Single value
-    const num = parseInt(resolved, 10);
-    if (Number.isNaN(num) || num < min || num > max) return null;
-    values.add(num);
-  }
-
-  return values.size > 0 ? { values } : null;
-}
-
-function parseCronExpression(parts: [string, string, string, string, string]): ParsedCron | null {
-  const minute = parseCronField(parts[0], 0, 59);
-  const hour = parseCronField(parts[1], 0, 23);
-  const dayOfMonth = parseCronField(parts[2], 1, 31);
-  const month = parseCronField(parts[3], 1, 12, MONTH_NAMES);
-  const dayOfWeek = parseCronField(parts[4], 0, 6, DAY_NAMES);
-
-  if (!minute || !hour || !dayOfMonth || !month || !dayOfWeek) return null;
-  return { minute, hour, dayOfMonth, month, dayOfWeek };
-}
-
-function findNextCronMatch(cron: ParsedCron, from: Date): Date {
-  // Start from the next minute after `from`
-  const candidate = new Date(from);
-  candidate.setSeconds(0, 0);
-  candidate.setMinutes(candidate.getMinutes() + 1);
-
-  // Search up to ~2 years ahead to avoid infinite loops
-  const maxIterations = 366 * 24 * 60; // ~1 year in minutes
-  for (let i = 0; i < maxIterations; i++) {
-    const mo = candidate.getMonth() + 1; // 1-12
-    const dom = candidate.getDate(); // 1-31
-    const dow = candidate.getDay(); // 0-6
-    const hr = candidate.getHours(); // 0-23
-    const mn = candidate.getMinutes(); // 0-59
-
-    if (
-      cron.month.values.has(mo) &&
-      cron.dayOfMonth.values.has(dom) &&
-      cron.dayOfWeek.values.has(dow) &&
-      cron.hour.values.has(hr) &&
-      cron.minute.values.has(mn)
-    ) {
-      return candidate;
-    }
-
-    candidate.setMinutes(candidate.getMinutes() + 1);
-  }
-
-  // Fallback: 1 hour from now
-  return new Date(from.getTime() + 3_600_000);
 }

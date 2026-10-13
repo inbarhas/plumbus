@@ -1,3 +1,6 @@
+import { createJobDispatchService, publishPendingJobs } from '../jobs/index.js';
+import { sweepFailedFlows } from '../flows/index.js';
+import type { EventDeliveryOptions, EventDeadLetterInfo } from '../events/index.js';
 // ── Worker Process Bootstrap ──
 // Separate process that starts background workers:
 // outbox dispatcher, event delivery worker, flow step executor,
@@ -139,7 +142,9 @@ function withCapabilityErrorHook(
 // Exported for direct testing.
 export async function assertFlowLeaseColumns(db: PostgresJsDatabase): Promise<void> {
   try {
-    await db.execute(sql`SELECT lease_owner, lease_expires_at FROM flow_executions LIMIT 0`);
+    await db.execute(
+      sql`SELECT lease_owner, lease_expires_at, lease_token, wait_kind FROM flow_executions LIMIT 0`,
+    );
   } catch (err) {
     const cause = err instanceof Error ? (err as { cause?: unknown }).cause : undefined;
     const pgCode =
@@ -148,7 +153,7 @@ export async function assertFlowLeaseColumns(db: PostgresJsDatabase): Promise<vo
         : undefined;
     if (pgCode === '42703') {
       throw new Error(
-        'Plumbus 0.3.0 requires new columns on flow_executions (lease_owner, lease_expires_at).\n' +
+        'Plumbus stabilization requires migrated flow_executions (lease_owner, lease_expires_at, lease_token, wait_kind).\n' +
           'Run `plumbus migrate generate` then `plumbus migrate apply` before starting workers.',
       );
     }
@@ -159,6 +164,8 @@ export async function assertFlowLeaseColumns(db: PostgresJsDatabase): Promise<vo
 // ── Worker Pool Config ──
 
 export interface WorkerPoolConfig {
+  eventDelivery?: EventDeliveryOptions;
+  onEventDeadLetter?: (info: EventDeadLetterInfo) => void | Promise<void>;
   /** Plumbus framework config */
   config: PlumbusConfig;
   /** Database connection */
@@ -269,7 +276,7 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
     flowPollIntervalMs: flowPollIntervalMsConfig = 1000,
     enableDispatcher = true,
     enableEventWorker = true,
-    enableScheduler = true,
+    enableScheduler = poolConfig.config.workers?.enableScheduler ?? true,
     enableFlowRunner = true,
   } = poolConfig;
 
@@ -308,6 +315,8 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
 
   // Event delivery worker
   const eventWorkerConfig: WorkerConfig = {
+    ...(poolConfig.eventDelivery ?? poolConfig.config.workers?.eventDelivery),
+    onEventDeadLetter: poolConfig.onEventDeadLetter,
     db,
     queue,
     consumers,
@@ -321,6 +330,8 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
   const jobEventWorker =
     enableEventWorker && jobsQueue !== queue
       ? createEventWorker({
+          ...(poolConfig.eventDelivery ?? poolConfig.config.workers?.eventDelivery),
+          onEventDeadLetter: poolConfig.onEventDeadLetter,
           db,
           queue: jobsQueue,
           consumers,
@@ -357,6 +368,7 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
             });
           }
         : undefined,
+    createContext: buildFlowRunnerContext,
     createDataService: createDataService ? (auth) => createDataService(auth) : undefined,
     createEventService: eventRegistry
       ? (auth) =>
@@ -411,6 +423,7 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
     registry: flows,
     engine: flowEngine,
     pollIntervalMs: schedulerPollIntervalMs,
+    logger,
   };
   const scheduler = enableScheduler ? createFlowScheduler(schedulerConfig) : null;
   let flowRunnerTimer: ReturnType<typeof setInterval> | null = null;
@@ -418,6 +431,7 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
   async function runFlowCycle(): Promise<void> {
     if (!enableFlowRunner) return;
     try {
+      await sweepFailedFlows(db);
       const claimed = await flowEngine.claimNext();
       if (claimed.length === 0) return;
 
@@ -458,7 +472,7 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
           const maxStepsPerCycle = 1000;
           let stepsRun = 0;
           while (stepsRun < maxStepsPerCycle) {
-            const result = await flowEngine.runNext(row.id, baseCtx);
+            const result = await flowEngine.runNext(row.id, baseCtx, row.leaseToken ?? undefined);
             stepsRun += 1;
             if (result.status !== FlowStatus.Running) {
               break;
@@ -484,7 +498,7 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
           // method is idempotent and guards on status, so this is safe even
           // if the row was concurrently finalized by cancel() or a peer worker.
           try {
-            await flowEngine.markFailedFromRunner(row.id, err);
+            await flowEngine.markFailedFromRunner(row.id, err, row.leaseToken ?? undefined);
           } catch (finalizeErr) {
             logger.error('Failed to finalize flow execution after run error', {
               executionId: row.id,
@@ -506,18 +520,34 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
       scopes: [],
       provider: 'worker',
     },
+    metadata?: { correlationId: string; flowId: string },
   ): import('../types/context.js').ExecutionContext {
+    const jobs = poolConfig.capabilities
+      ? createJobDispatchService({
+          db,
+          jobQueue: jobsQueue,
+          resolveCapability: (name) => poolConfig.capabilities?.get(name),
+          auth: systemAuth,
+          source: 'flow',
+          correlationId: metadata?.correlationId,
+          logger,
+        })
+      : undefined;
     if (poolConfig.entities && eventRegistry) {
       return createExecutionContext(
         wireContextDependencies(
           {
             db,
             auth: systemAuth,
+            correlationId: metadata?.correlationId,
+            getCausationId: () => metadata?.flowId,
+            audit,
             entities: poolConfig.entities,
             events: eventRegistry,
             encryptionKey: resolveEncryptionKey(),
           },
           {
+            jobs,
             flows: createFlowService(flowEngine, systemAuth, flows),
             ai: poolConfig.aiService,
             logger,
@@ -536,6 +566,8 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
       ? createEventEmitter({
           db,
           auth: systemAuth,
+          correlationId: metadata?.correlationId,
+          causationId: metadata?.flowId,
           registry: eventRegistry,
           audit: systemAudit,
         })
@@ -544,6 +576,7 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
       auth: systemAuth,
       data: dataService,
       events: eventService,
+      jobs,
       flows: createFlowService(flowEngine, systemAuth, flows),
       ai: poolConfig.aiService,
       audit: systemAudit,
@@ -581,6 +614,16 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
 
   let depthRefreshTimer: ReturnType<typeof setInterval> | null = null;
   let running = false;
+  let jobPublishTimer: ReturnType<typeof setInterval> | undefined;
+  let publishingJobs: Promise<unknown> | undefined;
+  function recoverJobs() {
+    if (publishingJobs) return;
+    publishingJobs = publishPendingJobs(db, jobsQueue, undefined, 50, logger)
+      .catch(() => logger.error('Pending job publication recovery failed'))
+      .finally(() => {
+        publishingJobs = undefined;
+      });
+  }
 
   return {
     get flowEngine() {
@@ -599,14 +642,18 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
         await assertFlowLeaseColumns(db);
       }
 
-      running = true;
-
       // Sync flow schedules to DB
       if (scheduler) {
         const synced = await scheduler.syncSchedules();
         logger.info(`Synced ${synced} flow schedules`);
         scheduler.start();
         logger.info('Flow scheduler started');
+      }
+
+      running = true;
+      if (poolConfig.capabilities?.getAll().some((capability) => capability.kind === 'job')) {
+        jobPublishTimer = setInterval(recoverJobs, 1000);
+        recoverJobs();
       }
 
       if (enableFlowRunner) {
@@ -664,10 +711,12 @@ export function createWorkerPool(poolConfig: WorkerPoolConfig): WorkerPool {
     async stop() {
       if (!running) return;
       logger.info('Shutting down worker pool...');
+      clearInterval(jobPublishTimer);
+      await publishingJobs;
 
       // Stop in reverse order: new work first, then in-flight
       if (scheduler) {
-        scheduler.stop();
+        await scheduler.stop();
         logger.info('Flow scheduler stopped');
       }
 

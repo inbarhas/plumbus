@@ -1,6 +1,6 @@
 {
   "name": "@plumbus/voice-openai",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "OpenAI STT/TTS providers for @plumbus/voice (official openai SDK).",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,16 +35,16 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20.6.0"
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   },
   "peerDependencies": {
-    "@plumbus/core": "0.7.x",
-    "@plumbus/voice": "0.5.x"
+    "@plumbus/core": "0.8.x",
+    "@plumbus/voice": "0.6.x"
   },
   "devDependencies": {
     "@plumbus/core": "workspace:*",
     "@plumbus/voice": "workspace:*",
-    "vitest": "^3.2.4"
+    "vitest": "5.0.4"
   },
   "license": "MIT",
   "dependencies": {

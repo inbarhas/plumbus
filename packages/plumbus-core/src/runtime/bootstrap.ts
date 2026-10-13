@@ -244,4 +244,5 @@ export type ServerExtensions = Pick<
   | 'authenticationRuntime'
 > & {
   onFlowError?: WorkerPoolConfig['onFlowError'];
+  onEventDeadLetter?: WorkerPoolConfig['onEventDeadLetter'];
 };

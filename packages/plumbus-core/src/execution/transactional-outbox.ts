@@ -54,7 +54,7 @@ export function createTransactionRunner(config: TransactionRunnerConfig): WithTr
       correlationId,
       getCausationId,
     });
-    return { data, events };
+    return { data, events, db: tx };
   }
 
   return async <T>(fn: (scope: TransactionScope) => Promise<T>): Promise<T> => {

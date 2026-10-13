@@ -1,175 +1,81 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { LoggerService } from '../../types/context.js';
 import { FlowRegistry } from '../registry.js';
 import { computeNextRun, createFlowScheduler } from '../scheduler.js';
 
-function mockDb(dueSchedules: any[] = []) {
-  return {
-    select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue(Promise.resolve(dueSchedules)),
-      }),
-    }),
-    insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockResolvedValue(undefined),
-    }),
-    update: vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
-      }),
-    }),
-  } as any;
-}
-
-function mockEngine(succeeds = true) {
-  return {
-    start: succeeds
-      ? vi.fn().mockResolvedValue({ id: 'exec-1', flowName: 'test', status: 'created' })
-      : vi.fn().mockRejectedValue(new Error('engine failure')),
-    runNext: vi.fn(),
-    resume: vi.fn(),
-    cancel: vi.fn(),
-    status: vi.fn(),
-  };
-}
-
-describe('FlowScheduler', () => {
-  it('polls and triggers due schedules', async () => {
-    const engine = mockEngine();
-    const db = mockDb([{ id: 's1', flowName: 'daily-report', cron: 'every:24h', enabled: true }]);
+describe('scheduler lifecycle', () => {
+  it('starts once and stops its timer', async () => {
+    const db = { transaction: vi.fn(async () => []) };
     const scheduler = createFlowScheduler({
-      db,
+      db: db as any,
       registry: new FlowRegistry(),
-      engine: engine as any,
+      engine: { wake: vi.fn() } as any,
     });
-
-    const triggered = await scheduler.poll();
-    expect(triggered).toBe(1);
-    expect(engine.start).toHaveBeenCalledWith('daily-report', {}, expect.any(Object));
+    expect(scheduler.isRunning).toBe(false);
+    scheduler.start();
+    scheduler.start();
+    expect(scheduler.isRunning).toBe(true);
+    await scheduler.stop();
+    expect(scheduler.isRunning).toBe(false);
   });
-
-  it('skips disabled schedules', async () => {
-    const engine = mockEngine();
-    const db = mockDb([{ id: 's1', flowName: 'disabled-flow', cron: 'every:1h', enabled: false }]);
-    const scheduler = createFlowScheduler({
-      db,
-      registry: new FlowRegistry(),
-      engine: engine as any,
-    });
-
-    const triggered = await scheduler.poll();
-    expect(triggered).toBe(0);
-    expect(engine.start).not.toHaveBeenCalled();
-  });
-
-  it('logs errors on failed flow starts instead of swallowing them', async () => {
-    const engine = mockEngine(false);
-    const logger: LoggerService = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
+  it('shares an active poll and waits for it during shutdown', async () => {
+    let release: (value: string[]) => void = () => {};
+    const db = {
+      transaction: vi.fn(
+        () =>
+          new Promise<string[]>((resolve) => {
+            release = resolve;
+          }),
+      ),
     };
-    const db = mockDb([{ id: 's1', flowName: 'broken-flow', cron: 'every:1h', enabled: true }]);
     const scheduler = createFlowScheduler({
-      db,
+      db: db as any,
       registry: new FlowRegistry(),
-      engine: engine as any,
-      logger,
+      engine: { wake: vi.fn() } as any,
     });
-
-    const triggered = await scheduler.poll();
-    expect(triggered).toBe(0);
-    expect(logger.error).toHaveBeenCalledWith(
-      'Scheduler failed to start flow "broken-flow"',
-      expect.objectContaining({
-        flowName: 'broken-flow',
-        error: 'engine failure',
-      }),
-    );
-  });
-
-  it('starts and stops the polling timer', () => {
-    const scheduler = createFlowScheduler({
-      db: mockDb(),
-      registry: new FlowRegistry(),
-      engine: mockEngine() as any,
+    const first = scheduler.poll();
+    const second = scheduler.poll();
+    expect(first).toBe(second);
+    let stopped = false;
+    const stop = scheduler.stop().then(() => {
+      stopped = true;
     });
-
-    expect(scheduler.isRunning).toBe(false);
-    scheduler.start();
-    expect(scheduler.isRunning).toBe(true);
-    scheduler.stop();
-    expect(scheduler.isRunning).toBe(false);
-  });
-
-  it('does not start twice', () => {
-    const scheduler = createFlowScheduler({
-      db: mockDb(),
-      registry: new FlowRegistry(),
-      engine: mockEngine() as any,
-    });
-
-    scheduler.start();
-    scheduler.start(); // should be idempotent
-    expect(scheduler.isRunning).toBe(true);
-    scheduler.stop();
-  });
-
-  it('logs a failed poll and keeps polling instead of rejecting', async () => {
-    vi.useFakeTimers();
-    try {
-      const db = mockDb();
-      db.select.mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockRejectedValue(new Error('CONNECT_TIMEOUT')),
-        }),
-      });
-      const logger: LoggerService = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-      };
-      const scheduler = createFlowScheduler({
-        db,
-        registry: new FlowRegistry(),
-        engine: mockEngine() as any,
-        logger,
-        pollIntervalMs: 1_000,
-      });
-
-      scheduler.start();
-      await vi.advanceTimersByTimeAsync(2_000);
-      scheduler.stop();
-
-      expect(db.select).toHaveBeenCalledTimes(2);
-      expect(logger.warn).toHaveBeenCalledTimes(2);
-      expect(logger.warn).toHaveBeenCalledWith('Flow scheduler poll failed; retrying next tick', {
-        error: 'CONNECT_TIMEOUT',
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    release([]);
+    await stop;
+    expect(await first).toBe(0);
   });
 });
 
-describe('computeNextRun', () => {
-  it('computes next run for minute interval', () => {
+describe('one cron implementation', () => {
+  it.each([
+    ['every:30m', 1800000],
+    ['every:2h', 7200000],
+    ['every:1d', 86400000],
+  ])('supports %s', (cron, duration) => {
     const from = new Date('2025-01-01T00:00:00Z');
-    const next = computeNextRun('every:30m', from);
-    expect(next.getTime() - from.getTime()).toBe(30 * 60_000);
+    expect(computeNextRun(cron as string, from).getTime() - from.getTime()).toBe(duration);
   });
-
-  it('computes next run for hour interval', () => {
-    const from = new Date('2025-01-01T00:00:00Z');
-    const next = computeNextRun('every:2h', from);
-    expect(next.getTime() - from.getTime()).toBe(2 * 3_600_000);
+  it.each([
+    'not-a-cron',
+    'every:0m',
+    '5junk * * * *',
+    '* * * * 9',
+  ])('rejects %s instead of silently changing the schedule', (cron) => {
+    expect(() => computeNextRun(cron, new Date())).toThrow();
   });
-
-  it('computes next run for day interval', () => {
-    const from = new Date('2025-01-01T00:00:00Z');
-    const next = computeNextRun('every:1d', from);
-    expect(next.getTime() - from.getTime()).toBe(86_400_000);
+  it('uses the specified timezone across DST and accepts Sunday aliases', () => {
+    expect(
+      computeNextRun(
+        '0 9 * * *',
+        new Date('2026-03-07T15:00:00Z'),
+        'America/New_York',
+      ).toISOString(),
+    ).toBe('2026-03-08T13:00:00.000Z');
+    const from = new Date('2026-01-01T00:00:00Z');
+    expect(computeNextRun('0 0 * * 7', from, 'UTC')).toEqual(
+      computeNextRun('0 0 * * SUN', from, 'UTC'),
+    );
+    expect(() => computeNextRun('0 0 * * *', from, 'not/a-zone')).toThrow();
   });
 });

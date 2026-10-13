@@ -1,6 +1,6 @@
 # @plumbus/core
 
-Release notes: [changelog](./CHANGELOG.md) and [version/upgrade guide](../../docs/upgrading-classification.md).
+Release notes: [changelog](./CHANGELOG.md) and [version/upgrade guide](../../docs/upgrading-stabilization.md).
 
 **AI-native, contract-driven TypeScript application framework.**
 
@@ -162,14 +162,15 @@ node_modules/@plumbus/core/instructions/
 ├── mcp.md                         # Core MCP surface (exposeAs, plumbus mcp *)
 ├── api.md                         # Core partner API surface (exposeAs: ['api'])
 ├── deployment.md                  # Production deployment and workers
+├── stabilization.md               # Core 0.8 migrations, cutover, and app upgrade checklist
 ├── peer-dependencies.md           # Add-on peer range literals (framework devs)
 └── upgrading-0.5-capabilities.md  # 0.5.x capability invocation migration
 ```
 
-Wire them up with `plumbus init --agent all`. After upgrading to core 0.7.9+, run
-`plumbus init --patch --agent all` for wiring v19 (v17 added the classification recipe;
-v18 adds the payments packages and Cognito server-attested sign-in; v19 adds the OpenAI
-Decisions provider). For classification, provider/model selection, or TypeSafe/Jev, Laya,
+Wire them up with `plumbus init --agent all`. After upgrading to core 0.8, run
+`plumbus init --patch --agent all` for wiring v21: shared root guidance in `AGENTS.md`, imported by `CLAUDE.md`.
+`--inline` embeds core recipes in the canonical file; patching preserves surrounding app notes. It retains the
+classification, payments, Cognito, and OpenAI Decisions guidance from v17–v19. For classification, provider/model selection, or TypeSafe/Jev, Laya,
 or OpenAI Decisions, start with [the classification recipe](instructions/ai-classification.md).
 
 ## Documentation
@@ -183,3 +184,5 @@ Full documentation: [github.com/plumbus-framework/plumbus/docs](https://github.c
 ## License
 
 MIT
+
+Core 0.8 requires the coordinated stabilization upgrade. Read [the packaged checklist](instructions/stabilization.md) before migration and process cutover.

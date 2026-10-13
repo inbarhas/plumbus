@@ -6,7 +6,7 @@ Plumbus provides structured AI interactions through prompts and the `ctx.ai` ser
 
 ```ts
 import { definePrompt } from "@plumbus/core";
-import { z } from "zod";
+import { z } from "@plumbus/core/zod";
 
 export const summarizeTicket = definePrompt({
   name: "summarizeTicket",

@@ -1,6 +1,6 @@
 {
   "name": "@plumbus/ai-decision-openai",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "OpenAI Decisions API typed decision provider adapter for Plumbus.",
   "type": "module",
   "main": "./dist/index.js",
@@ -44,17 +44,17 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20.6.0"
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   },
   "peerDependencies": {
-    "@plumbus/core": "0.7.x"
+    "@plumbus/core": "0.8.x"
   },
   "devDependencies": {
     "@plumbus/core": "workspace:*",
     "@biomejs/biome": "^2.4.6",
     "@types/node": "^25.4.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.4"
+    "vitest": "5.0.4"
   },
   "dependencies": {
     "@plumbus/ai-decision": "workspace:~"
