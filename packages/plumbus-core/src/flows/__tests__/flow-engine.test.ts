@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { defineFlow } from '../../define/defineFlow.js';
 import { LeaseLostError } from '../../errors/index.js';
 import { FlowStepType } from '../../types/enums.js';
@@ -16,8 +17,8 @@ function mockDb(rows: Map<string, any> = new Map()) {
   const updates: any[] = [];
   // Mutable state lets individual tests drive behavior: execute() return value and
   // guardedUpdate rowCount (0 simulates a lost lease).
-  const state: { executeResult: any[]; updateRowCount: number } = {
-    executeResult: [],
+  const state: { executeResult: any[] | undefined; updateRowCount: number } = {
+    executeResult: undefined,
     updateRowCount: 1,
   };
 
@@ -29,13 +30,16 @@ function mockDb(rows: Map<string, any> = new Map()) {
     insert: vi.fn().mockReturnValue({
       values: vi.fn().mockImplementation((row: any) => {
         inserts.push(row);
-        rows.set(row.id, {
-          ...row,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          completedAt: null,
-        });
-        return Promise.resolve();
+        if (row.id)
+          rows.set(row.id, {
+            ...row,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            completedAt: null,
+            retryCount: 0,
+          });
+        const result = Promise.resolve();
+        return Object.assign(result, { onConflictDoNothing: () => result });
       }),
     }),
     select: vi.fn().mockReturnValue({
@@ -62,7 +66,19 @@ function mockDb(rows: Map<string, any> = new Map()) {
         }),
       })),
     }),
-    execute: vi.fn().mockImplementation(() => Promise.resolve(state.executeResult)),
+    execute: vi.fn().mockImplementation((query) => {
+      if (state.executeResult !== undefined) return Promise.resolve(state.executeResult);
+      const rendered = new PgDialect().sqlToQuery(query);
+      const ids = [...rows.keys()];
+      const row =
+        [...rows.values()].find((value) => rendered.params.includes(value.id)) ??
+        rows.get(ids.at(-1));
+      if (!row) return Promise.resolve([]);
+      row.leaseToken = crypto.randomUUID();
+      row.status = FlowStatus.Running;
+      row.leaseExpiresAt = new Date(Date.now() + 60000);
+      return Promise.resolve([{ ...row }]);
+    }),
   } as any;
 }
 
@@ -540,7 +556,7 @@ describe('FlowEngine — lease claiming', () => {
     });
 
     const exec = await engine.start('single-step', {}, makeAuth());
-    await engine.runNext(exec.id, makeCtx());
+    await expect(engine.runNext(exec.id, makeCtx())).rejects.toBeInstanceOf(LeaseLostError);
 
     expect(audits.some((a) => a.action === 'flow.completed.single-step')).toBe(false);
   });
@@ -620,7 +636,7 @@ describe('FlowEngine — lease claiming', () => {
     });
 
     const exec = await engine.start('order-processing', { orderId: 'abc' }, makeAuth());
-    await engine.runNext(exec.id, makeCtx());
+    await expect(engine.runNext(exec.id, makeCtx())).rejects.toBeInstanceOf(LeaseLostError);
 
     expect(firstHeartbeatOk).toBe(true);
     expect(heartbeatError).toBeInstanceOf(LeaseLostError);
@@ -721,12 +737,13 @@ describe('FlowEngine — cooperative cancellation (ctx.signal)', () => {
     registry.register(makeTestFlow());
 
     const db = mockDb();
-    db._state.updateRowCount = 0; // every lease-extend reports 0 rows affected
+    db._state.updateRowCount = 1; // initial ownership check succeeds
 
     let abortReason: unknown;
 
     const stepDeps = {
       executeCapability: vi.fn().mockImplementation(async (_name: string, stepCtx: any) => {
+        db._state.updateRowCount = 0; // lose ownership during the step
         await new Promise<void>((resolve) => {
           stepCtx.signal.addEventListener(
             'abort',
@@ -828,7 +845,7 @@ describe('FlowEngine — cooperative cancellation (ctx.signal)', () => {
   });
 
   describe('markFailedFromRunner (zombie recovery)', () => {
-    it('finalizes the row as failed with lease cleared after LeaseLostError from runNext', async () => {
+    it('does not finalize another owner after LeaseLostError from runNext', async () => {
       const registry = new FlowRegistry();
       registry.register(makeTestFlow());
 
@@ -868,15 +885,8 @@ describe('FlowEngine — cooperative cancellation (ctx.signal)', () => {
       db._state.updateRowCount = 1;
       const finalized = await engine.markFailedFromRunner(exec.id, caught);
 
-      expect(finalized).toBe(true);
-      const finalize = db._updates.at(-1);
-      expect(finalize).toMatchObject({
-        status: FlowStatus.Failed,
-        leaseOwner: null,
-        leaseExpiresAt: null,
-      });
-      expect(finalize.lastError).toMatch(/Lease lost/);
-      expect(finalize.completedAt).toBeInstanceOf(Date);
+      expect(finalized).toBe(false);
+      expect(db._updates).toEqual([]);
     });
 
     it('is a no-op when the row is already in a terminal state', async () => {
@@ -932,7 +942,7 @@ describe('FlowEngine — cooperative cancellation (ctx.signal)', () => {
       expect(audits.some((a) => a.action === 'flow.runner.finalized')).toBe(false);
     });
 
-    it('uses "Unknown error" when the thrown value is neither Error nor string', async () => {
+    it('refuses runner finalization without a claim token', async () => {
       const registry = new FlowRegistry();
       registry.register(makeTestFlow());
 
@@ -949,7 +959,7 @@ describe('FlowEngine — cooperative cancellation (ctx.signal)', () => {
       await engine.markFailedFromRunner(exec.id, { weird: true });
 
       const finalize = db._updates.at(-1);
-      expect(finalize.lastError).toBe('Unknown error');
+      expect(finalize).toBeUndefined();
     });
   });
 });

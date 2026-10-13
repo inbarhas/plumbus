@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — Stabilization compatibility family
+
+- Upgrade the framework test toolchain to **Vitest 5.0.4** and require Node 22.12+ on the 22.x line, Node 24.x, or Node 26+.
+
+Requires the coordinated core 0.8 family. Follow the [stabilization upgrade guide](../../docs/upgrading-stabilization.md) and the installed `node_modules/@plumbus/core/instructions/stabilization.md`; update installed Plumbus packages together.
+
+- Update Plumbus peers to `@plumbus/core` `0.8.x`. This minor line makes the compatibility change an explicit upgrade.
+- Update the shared `@plumbus/ai-decision` dependency to `~0.3.0` in the published package.
+- Refresh package instructions and compatibility guidance for core 0.8 and agent wiring v21. Runtime APIs in this add-on are unchanged.
+
 ## 0.2.0 — 2026-10-08
 
 - Initial optional OpenAI Decisions API (`POST /v1/decisions`) adapter for typed choices, scores, and probabilities (#72), using `@plumbus/ai-decision` 0.2.3 contracts, validation, and the shared bounded HTTP transport. No OpenAI SDK dependency. OpenAI's Decisions API is in public beta; the adapter follows its documentation as of 2026-10-08 and may need a patch if the API changes at general availability.

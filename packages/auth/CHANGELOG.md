@@ -1,11 +1,13 @@
 # Changelog
 
-## 0.2.2 — 2026-10-12
+## 0.3.0 — Stabilization compatibility family
 
-### Fixed
+- Upgrade the framework test toolchain to **Vitest 5.0.4** and require Node 22.12+ on the 22.x line, Node 24.x, or Node 26+.
 
-- **Auth audit events are saved again.** The runtime wrote events with only `action` and `metadata`, so `createDatabaseAuditWriter` (the documented wiring) failed on every login, logout, and session replacement: `audit_records.component` and `audit_records.outcome` are `NOT NULL`. Events now carry `component: 'plumbus.auth'` (exported as `AUTH_AUDIT_COMPONENT`) and an `outcome`: `denied` for `auth.login.denied`, `failure` for `auth.login.failed` and `auth.login.cancelled`, `success` for the rest. The emitter's writer is now typed as `AuditWriter` from `@plumbus/core`, so a missing field is a type error.
-- **Failed audit writes say why.** `[@plumbus/auth] audit write failed for <event>` now includes the error message and code (from the driver error when Drizzle wraps it). Requests still never fail because of the audit write.
+Requires the coordinated core 0.8 family. Follow the [stabilization upgrade guide](../../docs/upgrading-stabilization.md) and the installed `node_modules/@plumbus/core/instructions/stabilization.md`; update installed Plumbus packages together.
+
+- Update Plumbus peers to `@plumbus/core` `0.8.x`. This minor line makes the compatibility change an explicit upgrade.
+- Refresh package instructions and compatibility guidance for core 0.8 and agent wiring v21. Runtime APIs in this add-on are unchanged.
 
 ## 0.2.1 — 2026-09-10
 

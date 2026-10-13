@@ -58,7 +58,7 @@ Optional add-on packages extend the core:
 
 ### Prerequisites
 
-- **Node.js** ≥ 20
+- **Node.js** 22.12+ on 22.x, 24.x, or 26+
 - **pnpm** ≥ 10
 - **PostgreSQL** (for persistence)
 - **Redis** (for queues, optional)
@@ -398,32 +398,34 @@ For a fuller explanation of the framework-first policy and destructive git safet
 
 ## Packages
 
+Current release: core **0.8.0**, UI **0.9.0**, MCP **0.7.0**, voice **0.6.0**, and other add-ons **0.3.0**. Read the [stabilization upgrade guide](docs/upgrading-stabilization.md) for migrations, worker cutover, and agent wiring **v21**. The [core changelog](packages/plumbus-core/CHANGELOG.md) maps fixes to PLB-01 through PLB-10.
+
 | Package | Description |
 |---------|-------------|
 | [`@plumbus/core`](packages/plumbus-core/) | Foundation — capabilities, entities, events, flows, prompts, translations, runtime, CLI, audit, governance |
 | [`@plumbus/ui`](packages/ui/) | Next.js/React UI — typed API clients, auth helpers, form metadata, scaffolds |
-| [`@plumbus/auth`](packages/auth/) | Optional peer `0.7.x` on core — OIDC RP runtime; hosted login, server sessions, CSRF |
-| [`@plumbus/auth-cognito`](packages/auth-cognito/) | Optional — Cognito integration for `@plumbus/auth` (peer `0.2.x`) |
-| [`@plumbus/payments`](packages/payments/) | Optional `0.2.x` — sellers (users or tenants) charge their own clients (payment pages, invoices, holds, saved cards, links, subscriptions, payouts, transfers, disputes), and the app bills its own customers (plans, seats, usage meters, entitlements), as capabilities/entities/events with signed webhooks; peer `@plumbus/core` `0.7.x` (**runtime ≥ 0.7.7**) |
-| [`@plumbus/payments-stripe`](packages/payments-stripe/) | Optional `0.2.x` — Stripe provider for `@plumbus/payments` (Connect with Accounts v2, direct and destination charges, Checkout, Billing, Balance Settings, snapshot + thin webhooks); peer `@plumbus/payments` `0.2.x` |
-| [`@plumbus/api`](packages/api/) | Optional peer `0.2.x` — partner external API; manifest, OpenAPI, docs, compatibility diff, test intent |
-| [`@plumbus/ai-bedrock`](packages/ai-bedrock/) | Optional peer `0.2.x` — Amazon Bedrock Converse + embeddings; AWS Price List pricing (file or region auto-download); peer `@plumbus/core` `0.7.x` (**runtime ≥ 0.7.0**; prompt caching through `ctx.ai` needs ≥ 0.7.9). See [`instructions/pricing.md`](packages/ai-bedrock/instructions/pricing.md) for pull URLs |
+| [`@plumbus/auth`](packages/auth/) | Optional peer `0.8.x` on core — OIDC RP runtime; hosted login, server sessions, CSRF |
+| [`@plumbus/auth-cognito`](packages/auth-cognito/) | Optional — Cognito integration for `@plumbus/auth` (peer `0.3.x`) |
+| [`@plumbus/payments`](packages/payments/) | Optional `0.3.x` — sellers (users or tenants) charge their own clients (payment pages, invoices, holds, saved cards, links, subscriptions, payouts, transfers, disputes), and the app bills its own customers (plans, seats, usage meters, entitlements), as capabilities/entities/events with signed webhooks; peer `@plumbus/core` `0.8.x` (**runtime ≥ 0.7.7**) |
+| [`@plumbus/payments-stripe`](packages/payments-stripe/) | Optional `0.3.x` — Stripe provider for `@plumbus/payments` (Connect with Accounts v2, direct and destination charges, Checkout, Billing, Balance Settings, snapshot + thin webhooks); peer `@plumbus/payments` `0.3.x` |
+| [`@plumbus/api`](packages/api/) | Optional peer `0.3.x` — partner external API; manifest, OpenAPI, docs, compatibility diff, test intent |
+| [`@plumbus/ai-bedrock`](packages/ai-bedrock/) | Optional peer `0.3.x` — Amazon Bedrock Converse + embeddings; AWS Price List pricing (file or region auto-download); peer `@plumbus/core` `0.8.x` (**runtime ≥ 0.7.0**; prompt caching through `ctx.ai` needs ≥ 0.7.9). See [`instructions/pricing.md`](packages/ai-bedrock/instructions/pricing.md) for pull URLs |
 | [`@plumbus/ai-decision`](packages/ai-decision/) | Shared typed decision contracts, validation and transport; core `0.7.3+` integrates `ctx.ai.decide()` and cost recording |
 | [`@plumbus/ai-decision-typesafe`](packages/ai-decision-typesafe/) | Optional TypeSafe/Jev decision adapter; choices, scores, probabilities and input pricing |
 | [`@plumbus/ai-decision-laya`](packages/ai-decision-laya/) | Optional self-hosted Laya decision adapter and Python reference service |
 | [`@plumbus/ai-decision-openai`](packages/ai-decision-openai/) | Optional OpenAI Decisions API adapter (`gpt-6-luna`, public beta); choices, scores, probabilities and input pricing; use with core **≥ 0.7.9** |
-| [`@plumbus/mcp`](packages/mcp/) | Optional peer `0.6.x` — MCP runtime; expose capabilities to AI agents over the Model Context Protocol |
-| [`@plumbus/chat`](packages/chat/) | Optional peer `0.2.x` — conversational runtime; `defineChat`, policy guards, context sources, streamed events |
+| [`@plumbus/mcp`](packages/mcp/) | Optional peer `0.7.x` — MCP runtime; expose capabilities to AI agents over the Model Context Protocol |
+| [`@plumbus/chat`](packages/chat/) | Optional peer `0.3.x` — conversational runtime; `defineChat`, policy guards, context sources, streamed events |
 | [`@plumbus/chat-ui`](packages/chat-ui/) | Optional — React hooks and `<ChatPanel />` for the `@plumbus/chat` turn protocol (peer of `@plumbus/chat`) |
-| [`@plumbus/knowledge-base`](packages/knowledge-base/) | Optional peer of `@plumbus/chat` `0.2.x` — scoped knowledge providers and registry for registry-backed grounding |
-| [`@plumbus/voice`](packages/voice/) | Optional `0.5.x` — real-time voice runtime (`defineVoice`, routes, builtins: websocket / web-speech / browser-tts); peer `@plumbus/core` `0.7.x` |
-| [`@plumbus/voice-openai`](packages/voice-openai/) | Optional `0.2.x` — OpenAI Whisper / Realtime STT + OpenAI TTS; peer `@plumbus/voice` `0.5.x` |
-| [`@plumbus/voice-livekit`](packages/voice-livekit/) | Optional `0.2.x` — LiveKit transport, agent worker, browser session; peer `@plumbus/voice` `0.5.x` |
-| [`@plumbus/voice-soniox`](packages/voice-soniox/) | Optional `0.2.x` — Soniox STT/TTS adapters; peer `@plumbus/voice` `0.5.x` |
-| [`@plumbus/voice-deepdub`](packages/voice-deepdub/) | Optional `0.2.x` — Deepdub TTS adapter; peer `@plumbus/voice` `0.5.x` |
-| [`@plumbus/voice-elevenlabs`](packages/voice-elevenlabs/) | Optional `0.2.x` — ElevenLabs TTS adapter; peer `@plumbus/voice` `0.5.x` |
-| [`@plumbus/voice-minimax`](packages/voice-minimax/) | Optional `0.2.x` — MiniMax TTS adapter; peer `@plumbus/voice` `0.5.x` |
-| [`@plumbus/browser-extension`](packages/browser-extension/) | Optional `0.2.x` — dev-time WXT scaffolder for Chrome/Firefox extensions wired to your capabilities (with `@plumbus/ui`) |
+| [`@plumbus/knowledge-base`](packages/knowledge-base/) | Optional peer of `@plumbus/chat` `0.3.x` — scoped knowledge providers and registry for registry-backed grounding |
+| [`@plumbus/voice`](packages/voice/) | Optional `0.6.x` — real-time voice runtime (`defineVoice`, routes, builtins: websocket / web-speech / browser-tts); peer `@plumbus/core` `0.8.x` |
+| [`@plumbus/voice-openai`](packages/voice-openai/) | Optional `0.3.x` — OpenAI Whisper / Realtime STT + OpenAI TTS; peer `@plumbus/voice` `0.6.x` |
+| [`@plumbus/voice-livekit`](packages/voice-livekit/) | Optional `0.3.x` — LiveKit transport, agent worker, browser session; peer `@plumbus/voice` `0.6.x` |
+| [`@plumbus/voice-soniox`](packages/voice-soniox/) | Optional `0.3.x` — Soniox STT/TTS adapters; peer `@plumbus/voice` `0.6.x` |
+| [`@plumbus/voice-deepdub`](packages/voice-deepdub/) | Optional `0.3.x` — Deepdub TTS adapter; peer `@plumbus/voice` `0.6.x` |
+| [`@plumbus/voice-elevenlabs`](packages/voice-elevenlabs/) | Optional `0.3.x` — ElevenLabs TTS adapter; peer `@plumbus/voice` `0.6.x` |
+| [`@plumbus/voice-minimax`](packages/voice-minimax/) | Optional `0.3.x` — MiniMax TTS adapter; peer `@plumbus/voice` `0.6.x` |
+| [`@plumbus/browser-extension`](packages/browser-extension/) | Optional `0.3.x` — dev-time WXT scaffolder for Chrome/Firefox extensions wired to your capabilities (with `@plumbus/ui`) |
 
 The optional packages are version-locked peer add-ons — install them explicitly only when you need them (see [`docs/README.md`](docs/README.md)).
 
@@ -445,7 +447,7 @@ cd plumbus
 # Install dependencies
 pnpm install
 
-# Run all tests (2257 tests across 245 files)
+# Run all tests
 pnpm test
 
 # Type check
@@ -498,7 +500,7 @@ plumbus/
 | Layer | Technology |
 |-------|-----------|
 | Language | TypeScript 5.x (strict, ESM) |
-| Runtime | Node.js ≥ 20 |
+| Runtime | Node 22.12+ on the 22.x line, Node 24.x, or Node 26+ |
 | HTTP Server | Fastify 5 |
 | Database | PostgreSQL via Drizzle ORM |
 | Validation | Zod |

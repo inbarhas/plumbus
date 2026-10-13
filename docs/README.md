@@ -2,14 +2,18 @@
 
 Welcome to the Plumbus framework documentation. Use the navigation below to find what you need.
 
+For the current core **0.8** family, start with the [stabilization upgrade guide](./upgrading-stabilization.md): database migrations, coordinated worker cutover, schedule reconciliation, and agent wiring **v21**. The [core changelog](../packages/plumbus-core/CHANGELOG.md) maps each fix to the original PLB issue.
+
 For classification provider/model selection and agent wiring v17, see the
 [classification upgrade guide](./upgrading-classification.md) and
 [packaged agent recipe](../packages/plumbus-core/instructions/ai-classification.md).
-Core 0.7.9 generates wiring v19, which also links the OpenAI Decisions provider
+Core 0.7.9 introduced wiring v19, which also links the OpenAI Decisions provider
 (`@plumbus/ai-decision-openai`); see [Agent setup](./agents/agent-setup.md#openai-decisions-provider--wiring-v19)
 and [Decision providers](./ai/decision-providers.md).
 
-See the [2026-09-23 voice and decision release guide](./upgrading-voice-and-decision-release.md) for package versions and paired upgrades.
+The [2026-09-23 voice and decision release guide](./upgrading-voice-and-decision-release.md) records earlier package versions and paired upgrades.
+
+The [Vitest 5 migration guide](./upgrading-vitest.md) covers the bundled test-runner upgrade, Node requirements, worker limits, and existing app test configs.
 
 ## Documentation Map
 
@@ -25,6 +29,7 @@ docs/
 │   ├── workers-and-queues.md
 │   ├── execution-lifecycle.md
 │   └── diagrams.md
+├── upgrading-stabilization.md  Core 0.8 family, migrations, cutover, and wiring v21
 ├── upgrading-workers.md       0.5.0 workers/queues migration guide
 ├── upgrading-capability-names.md  Canonical names, invoke policy, flow auth snapshot
 ├── upgrading-voice-provider-packages.md  0.4.0 voice provider add-on packages

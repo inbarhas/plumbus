@@ -7,8 +7,8 @@ import {
 } from '../drift-inspector.js';
 
 describe('FRAMEWORK_TABLE_NAMES', () => {
-  it('contains all 10 framework table names', () => {
-    expect(FRAMEWORK_TABLE_NAMES).toHaveLength(10);
+  it('contains all 11 framework table names', () => {
+    expect(FRAMEWORK_TABLE_NAMES).toHaveLength(11);
   });
 
   it('includes expected table names', () => {

@@ -34,6 +34,7 @@ export async function loadServerExtensions(
       extensions.onAICostRecorded = mod.onAICostRecorded ?? mod.default?.onAICostRecorded;
       extensions.enableStrictStructuredOutputs =
         mod.enableStrictStructuredOutputs ?? mod.default?.enableStrictStructuredOutputs;
+      extensions.onEventDeadLetter = mod.onEventDeadLetter ?? mod.default?.onEventDeadLetter;
       extensions.onFlowError = mod.onFlowError ?? mod.default?.onFlowError;
       const authenticationRuntime = mod.authenticationRuntime ?? mod.default?.authenticationRuntime;
       if (authenticationRuntime !== undefined) {

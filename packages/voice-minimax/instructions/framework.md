@@ -1,8 +1,8 @@
 # @plumbus/voice-minimax — Framework
 
-## Release family 0.2.0
+## Release family 0.3.0
 
-This package requires an explicit upgrade from its previous minor line. Current Plumbus peers: `@plumbus/core` `0.7.x`, `@plumbus/voice` `0.5.x`. Install the matching versions of all Plumbus packages the app uses; do not bypass peer checks with `--force` or `--legacy-peer-deps`. Historical feature floors below describe earlier releases, not compatibility with this new family. Read the core `instructions/upgrading-security-release.md` checklist and refresh agent wiring with `plumbus init --patch` (v16).
+This package requires an explicit upgrade from its previous minor line. Current Plumbus peers: `@plumbus/core` `0.8.x`, `@plumbus/voice` `0.6.x`. Install the matching versions of all Plumbus packages the app uses; do not bypass peer checks with `--force` or `--legacy-peer-deps`. Historical feature floors below describe earlier releases, not compatibility with this new family. Read the core `instructions/stabilization.md` checklist and refresh agent wiring with `plumbus init --patch --agent all` (v21).
 
 
 **Exact path in a consumer app:** `node_modules/@plumbus/voice-minimax/instructions/framework.md`
@@ -20,8 +20,8 @@ Index: `node_modules/@plumbus/voice-minimax/instructions/README.md`
 **Peers (copy literals):**
 
 ```json
-"@plumbus/core": "0.7.x",
-"@plumbus/voice": "0.5.x"
+"@plumbus/core": "0.8.x",
+"@plumbus/voice": "0.6.x"
 ```
 
 ## Install

@@ -110,10 +110,10 @@ describe('collectSchemas', () => {
     expect(getTableName(getSchema(schemas, '__document_chunks'))).toBe('document_chunks');
   });
 
-  it('includes all 10 framework tables with zero entities', () => {
+  it('includes all 11 framework tables with zero entities', () => {
     const schemas = collectSchemas([]);
     const frameworkKeys = Object.keys(schemas).filter((k) => k.startsWith('__'));
-    expect(frameworkKeys).toHaveLength(10);
+    expect(frameworkKeys).toHaveLength(11);
   });
 
   it('throws when an extra schema collides with an entity table name', () => {

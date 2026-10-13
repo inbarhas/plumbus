@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — Stabilization compatibility family
+
+- Upgrade the framework test toolchain to **Vitest 5.0.4** and require Node 22.12+ on the 22.x line, Node 24.x, or Node 26+.
+
+Requires the coordinated core 0.8 family. Follow the [stabilization upgrade guide](../../docs/upgrading-stabilization.md) and the installed `node_modules/@plumbus/core/instructions/stabilization.md`; update installed Plumbus packages together.
+
+- Update Plumbus peers to `@plumbus/core` `0.8.x`, `@plumbus/knowledge-base` `0.3.x` (optional). This minor line makes the compatibility change an explicit upgrade.
+- Refresh package instructions and compatibility guidance for core 0.8 and agent wiring v21. Runtime APIs in this add-on are unchanged.
+
 ## 0.2.2 — 2026-09-23
 
 - Expose custom-agent structured output through optional server-only `onAgentOutput` while emitting only `content`. Custom-agent tool turns validate their prompt output without retrying malformed final answers.

@@ -1,10 +1,12 @@
 # @plumbus/auth-cognito
 
+Release **0.3.0** belongs to the core 0.8 stabilization family. See the [changelog](./CHANGELOG.md) and [upgrade guide](../../docs/upgrading-stabilization.md) before updating an existing app.
+
 > **Amazon Cognito for [Plumbus](https://github.com/plumbus-framework/plumbus) apps.** Put Cognito's hosted login behind [`@plumbus/auth`](../auth/) with one `cognito()` integration, or keep your own passwordless sign-in (magic links, passkeys) and sign each person into their Cognito user from the server — with idempotent pool administration and an in-process fake Cognito for tests.
 
 [![npm](https://img.shields.io/npm/v/@plumbus/auth-cognito.svg)](https://www.npmjs.com/package/@plumbus/auth-cognito)
 [![license](https://img.shields.io/npm/l/@plumbus/auth-cognito.svg)](https://github.com/plumbus-framework/plumbus/blob/main/LICENSE)
-[![peer: @plumbus/auth 0.2.x](https://img.shields.io/badge/peer-%40plumbus%2Fauth%200.2.x-blue)](https://www.npmjs.com/package/@plumbus/auth)
+[![peer: @plumbus/auth 0.3.x](https://img.shields.io/badge/peer-%40plumbus%2Fauth%200.3.x-blue)](https://www.npmjs.com/package/@plumbus/auth)
 [![Amazon Cognito](https://img.shields.io/badge/Amazon-Cognito-ff9900)](https://aws.amazon.com/cognito/)
 
 ## What is this?
@@ -51,7 +53,7 @@ This package ships those pieces, tested against each other. The hosted-login hal
 
 ## Status
 
-Optional add-on for `@plumbus/auth` (version-locked **`0.2.x`**; peer `@plumbus/auth` **`0.2.x`**). The server-attested subpaths (`./server`, `./triggers`, `./testing`) are available from **0.2.2**; they depend on the AWS SDK and `jose`, which the root `cognito()` export and `./triggers` never load. Agent wiring **v18** (`@plumbus/core` **≥ 0.7.7**) links the package's `attested-sign-in.md` recipe.
+Optional add-on for `@plumbus/auth` (version-locked **`0.3.x`**; peer `@plumbus/auth` **`0.3.x`**). The server-attested subpaths (`./server`, `./triggers`, `./testing`) are available from **0.2.2**; they depend on the AWS SDK and `jose`, which the root `cognito()` export and `./triggers` never load. Agent wiring **v18** (`@plumbus/core` **≥ 0.7.7**) links the package's `attested-sign-in.md` recipe.
 
 Not included: a general Cognito emulator (the fake covers the actions this package uses), identity pools / federated AWS credentials, and hosted login for public (secretless) app clients.
 
@@ -61,7 +63,7 @@ Not included: a general Cognito emulator (the fake covers the actions this packa
 pnpm add @plumbus/auth @plumbus/auth-cognito
 ```
 
-Peer (copy literally): `@plumbus/auth` `0.2.x`. See `packages/plumbus-core/instructions/peer-dependencies.md`.
+Peer (copy literally): `@plumbus/auth` `0.3.x`. See `packages/plumbus-core/instructions/peer-dependencies.md`.
 
 If agent wiring predates the Cognito recipes, refresh:
 

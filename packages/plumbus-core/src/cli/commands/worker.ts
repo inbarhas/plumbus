@@ -11,7 +11,7 @@ import {
 } from '../../data/connection.js';
 import { deadLetterTable, outboxTable } from '../../events/outbox.js';
 import { PromptRegistry } from '../../ai/prompt-registry.js';
-import { loadConfig, validateConfig } from '../../config/loader.js';
+import { loadAppConfig, validateConfig } from '../../config/index.js';
 import { EntityRegistry } from '../../data/registry.js';
 import { ConsumerRegistry } from '../../events/consumer-registry.js';
 import { EventRegistry } from '../../events/registry.js';
@@ -43,7 +43,7 @@ export interface WorkerStartOptions {
 export async function startWorkerProcess(
   options: WorkerStartOptions & { db?: PostgresJsDatabase; connection?: DatabaseConnection },
 ): Promise<{ shutdown: () => Promise<void> }> {
-  const config = loadConfig();
+  const config = await loadAppConfig();
   const validation = validateConfig(config);
   if (!validation.valid) {
     throw new Error(`Config validation failed: ${validation.errors.join(', ')}`);
@@ -200,7 +200,7 @@ export function registerWorkerCommand(program: Command): void {
     .description('Summarize worker-related configuration (static check)')
     .option('--json', 'Output JSON')
     .action(async (opts: { json?: boolean }) => {
-      const config = loadConfig();
+      const config = await loadAppConfig();
       const resources = await discoverRuntimeResources();
       const role = resolveRuntimeRole('worker');
       const queues = await resolveRuntimeQueues(config, { preferInMemory: true });
@@ -248,7 +248,9 @@ export function registerWorkerCommand(program: Command): void {
       const summary = {
         runtimeRole: role,
         needsWorkerPool: needsWorkerPool(resources),
-        queueBackend: queues.backend,
+        queueBackend: configuredDurable ? 'redis' : 'memory',
+        environment: config.environment,
+        queuePrefix: config.queue.prefix ?? `plumbus:${config.environment}`,
         queueDurable: configuredDurable,
         components: {
           outboxDispatcher: true,

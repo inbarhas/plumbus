@@ -34,6 +34,15 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The release gate runs the same real-server integration tests as PR CI.
+      - name: Install integration test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends redis-server postgresql-16
+          redis-server --version
+          /usr/lib/postgresql/16/bin/initdb --version
+          /usr/lib/postgresql/16/bin/pg_ctl --version
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm format:check

@@ -2,7 +2,7 @@
 
 **Previous:** [migration.md](./migration.md) · **Next:** [README](./README.md)
 
-Production checklist for `@plumbus/auth` on `@plumbus/core` 0.6.x.
+Production checklist for `@plumbus/auth` on `@plumbus/core` 0.8.x.
 
 ---
 
@@ -10,8 +10,8 @@ Production checklist for `@plumbus/auth` on `@plumbus/core` 0.6.x.
 
 | Package | Peer |
 |---|---|
-| `@plumbus/auth` | `@plumbus/core` **`0.7.x`** |
-| `@plumbus/auth-cognito` | `@plumbus/auth` **`0.2.x`** |
+| `@plumbus/auth` | `@plumbus/core` **`0.8.x`** |
+| `@plumbus/auth-cognito` | `@plumbus/auth` **`0.3.x`** |
 
 Install production deps with **npm** in Docker (`npm install --omit=dev`) — copy peer literals from [`peer-dependencies.md`](../../packages/plumbus-core/instructions/peer-dependencies.md).
 

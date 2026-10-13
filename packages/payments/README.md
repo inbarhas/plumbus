@@ -1,10 +1,12 @@
 # @plumbus/payments
 
+Release **0.3.0** belongs to the core 0.8 stabilization family. See the [changelog](./CHANGELOG.md) and [upgrade guide](../../docs/upgrading-stabilization.md) before updating an existing app.
+
 > **Payments for [Plumbus](https://github.com/plumbus-framework/plumbus) apps.** Your users charge their own clients with your app as the platform, and your app bills its own customers for plans, as Plumbus capabilities, entities, and events with verified webhooks.
 
 [![npm](https://img.shields.io/npm/v/@plumbus/payments.svg)](https://www.npmjs.com/package/@plumbus/payments)
 [![license](https://img.shields.io/npm/l/@plumbus/payments.svg)](https://github.com/plumbus-framework/plumbus/blob/main/LICENSE)
-[![peer: @plumbus/core 0.7.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.7.x-blue)](https://www.npmjs.com/package/@plumbus/core)
+[![peer: @plumbus/core 0.8.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.8.x-blue)](https://www.npmjs.com/package/@plumbus/core)
 
 ## What is this?
 
@@ -48,7 +50,7 @@ Everything is a Plumbus primitive: money moves through **capabilities** (access 
 
 ## Status
 
-Optional add-on of `@plumbus/core`, version `0.2.2` (version-locked **`0.2.x`**); peer `@plumbus/core` **`0.7.x`**, optional peer `fastify` `^5` for the webhook route. **Runtime floor:** `@plumbus/core` **≥ 0.7.7** (`field.bigint()` for amounts, and discovery of exported collections such as `payments.capabilities`); agent wiring **v18** (core 0.7.7+) links these instructions. Verified end to end on the real Plumbus runtime by [`examples/payments-connect-app`](../../examples/payments-connect-app/) (28 scenarios, against a local Stripe simulator). Install alone does nothing until the collections, webhook route, and worker are wired.
+Optional add-on of `@plumbus/core`, version `0.3.0` (version-locked **`0.3.x`**); peer `@plumbus/core` **`0.8.x`**, optional peer `fastify` `^5` for the webhook route. **Runtime floor:** `@plumbus/core` **≥ 0.7.7** (`field.bigint()` for amounts, and discovery of exported collections such as `payments.capabilities`); agent wiring **v18** (core 0.7.7+) links these instructions. Verified end to end on the real Plumbus runtime by [`examples/payments-connect-app`](../../examples/payments-connect-app/) (28 scenarios, against a local Stripe simulator). Install alone does nothing until the collections, webhook route, and worker are wired.
 
 Not included: linking an existing Stripe account (OAuth), a custom card form in your page (use embedded payment pages), seller-defined products and price lists at the provider, and Stripe private previews. See [what this release does not offer](../../docs/payments/options.md#choices-this-release-does-not-offer).
 
@@ -58,7 +60,7 @@ Not included: linking an existing Stripe account (OAuth), a custom card form in 
 pnpm add @plumbus/payments @plumbus/payments-stripe
 ```
 
-Peers: `@plumbus/core` **`0.7.x`** (runtime **≥ 0.7.7**), optional `fastify` `^5` for the webhook route. Copy them literally; see `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
+Peers: `@plumbus/core` **`0.8.x`** (runtime **≥ 0.7.7**), optional `fastify` `^5` for the webhook route. Copy them literally; see `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
 
 If agent wiring predates the payments instructions, refresh:
 

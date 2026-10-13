@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/@plumbus/ai-decision-openai.svg)](https://www.npmjs.com/package/@plumbus/ai-decision-openai)
 [![license](https://img.shields.io/npm/l/@plumbus/ai-decision-openai.svg)](https://github.com/plumbus-framework/plumbus/blob/main/LICENSE)
-[![peer: @plumbus/core 0.7.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.7.x-blue)](https://www.npmjs.com/package/@plumbus/core)
+[![peer: @plumbus/core 0.8.x](https://img.shields.io/badge/peer-%40plumbus%2Fcore%200.8.x-blue)](https://www.npmjs.com/package/@plumbus/core)
 
 ## What is this?
 
@@ -45,14 +45,14 @@ This package gives apps that already use OpenAI a registered decision provider w
 
 ## Status
 
-Optional decision provider, version `0.2.0` (version-locked **`0.2.x`**); required peer `@plumbus/core` exactly **`0.7.x`**; Node.js 20.6+. **Runtime floor:** `ctx.ai.decide()` needs `@plumbus/core` **≥ 0.7.3** and `ctx.ai.classify({ provider })` needs **≥ 0.7.4**; use core **0.7.9** (see [Install](#install)); agent wiring **v19** (core 0.7.9) links these instructions. Depends on `@plumbus/ai-decision` `~0.2.3`. Install alone is not enough until the adapter is registered under `decisions.providers`.
+Optional decision provider, version `0.3.0` (version-locked **`0.3.x`**); required peer `@plumbus/core` exactly **`0.8.x`**; Node 22.12+ on the 22.x line, Node 24.x, or Node 26+. Core 0.8 and the provider packages use shared contracts `~0.3.0`. Refresh agent wiring to **v21** with `plumbus init --patch --agent all`. Install alone does not register the adapter: configure `decisions.providers` at the server boundary.
 
 OpenAI's Decisions API is in public beta. This adapter follows OpenAI's documentation as of
 2026-10-08 and may need a patch release if the API changes when it becomes generally available.
 
 Not included: vendor model catalogs, automatic environment provider discovery, and dedicated decision CLI commands.
 
-Release notes: [changelog](./CHANGELOG.md) and [version/upgrade guide](../../docs/upgrading-classification.md).
+Release notes: [changelog](./CHANGELOG.md) and [version/upgrade guide](../../docs/upgrading-stabilization.md).
 
 ## Install
 
@@ -61,16 +61,15 @@ pnpm add @plumbus/ai-decision-openai
 ```
 
 Install explicitly with `pnpm add @plumbus/ai-decision-openai`. Provider packages install
-`@plumbus/ai-decision` (`0.2.3+`) transitively. There is no dependency on the OpenAI SDK
+`@plumbus/ai-decision` (`~0.3.0`) transitively. There is no dependency on the OpenAI SDK
 or on the other decision providers.
 
 Through `ctx.ai`, core checks every result again with its own copy of
-`@plumbus/ai-decision`, and only 0.2.3+ allows for this adapter's rounding. Core 0.7.9
-depends on `~0.2.3`. On core 0.7.3–0.7.8, run `pnpm dedupe` after installing and check
-that `pnpm why @plumbus/ai-decision` lists a single 0.2.3+ copy. With an older copy,
-core rejects OpenAI's rounded answers as `invalid_response` after the call is billed.
+`@plumbus/ai-decision`. Core 0.8 and this adapter both use `~0.3.0`, which includes
+the rounding support introduced in 0.2.3. Install matching release families;
+legacy core 0.7 deployment advice is in the [historical classification guide](../../docs/upgrading-classification.md).
 
-Peer (copy literally): `@plumbus/core` `0.7.x`. See `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
+Peer (copy literally): `@plumbus/core` `0.8.x`. See `node_modules/@plumbus/core/instructions/peer-dependencies.md`.
 
 If agent wiring predates the decision provider instructions, refresh:
 
